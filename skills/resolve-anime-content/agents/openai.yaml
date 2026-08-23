@@ -1,0 +1,4 @@
+interface:
+  display_name: "Resolve Anime Content"
+  short_description: "Identify anime works and characters with evidence"
+  default_prompt: "Use $resolve-anime-content to identify and organize this anime release."

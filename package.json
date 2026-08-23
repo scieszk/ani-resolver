@@ -1,0 +1,60 @@
+{
+  "name": "ani-resolver",
+  "version": "0.1.0",
+  "description": "Evidence-driven anime work and character identity resolver for humans and AI agents.",
+  "keywords": [
+    "anime",
+    "bangumi",
+    "tmdb",
+    "resolver",
+    "cli",
+    "agent-skill"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/scieszk/ani-resolver.git"
+  },
+  "homepage": "https://github.com/scieszk/ani-resolver#readme",
+  "bugs": {
+    "url": "https://github.com/scieszk/ani-resolver/issues"
+  },
+  "type": "module",
+  "bin": {
+    "ani-resolver": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "npm run check && npm run test && npm run build"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^15.0.0",
+    "parse-torrent": "^11.0.24",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/parse-torrent": "^11.0.1",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.7"
+  }
+}
