@@ -6,21 +6,28 @@ import { fileURLToPath } from "node:url";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 
 import { parseContentInput } from "./input.js";
-import { createDefaultProviders } from "./providers/index.js";
+import { ProviderManager } from "./provider-management.js";
 import { Resolver } from "./resolver.js";
-import type { EntityType, ExternalId, Provider } from "./types.js";
+import type { EntityType, ExternalId, Provider, ResolveResult } from "./types.js";
 
 export interface CliOptions {
   providers?: Provider[];
+  providerManager?: ProviderManager;
   stdout?: NodeJS.WritableStream;
   stderr?: NodeJS.WritableStream;
 }
 
 export function createCli(options: CliOptions = {}): Command {
-  const providers = options.providers ?? createDefaultProviders();
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
-  const resolver = new Resolver(providers);
+  const providerManager = options.providerManager ?? new ProviderManager();
+  let hostPromise: ReturnType<ProviderManager["loadProviderHost"]> | undefined;
+  const loadProviders = async (): Promise<Provider[]> => {
+    if (options.providers) return options.providers;
+    hostPromise ??= providerManager.loadProviderHost();
+    return (await hostPromise).providers();
+  };
+  const loadResolver = async () => new Resolver(await loadProviders());
   const program = new Command();
 
   program
@@ -38,7 +45,11 @@ export function createCli(options: CliOptions = {}): Command {
     .description("Parse a title, release name, path, torrent, or magnet into content evidence")
     .argument("<input>")
     .option("--json", "Emit JSON")
-    .action(async (input: string) => writeJson(stdout, await parseContentInput(input)));
+    .option("--full-files", "Include every parsed file path")
+    .action(async (input: string, commandOptions: { fullFiles?: boolean }) => {
+      const evidence = await parseContentInput(input);
+      writeJson(stdout, commandOptions.fullFiles ? evidence : compactEvidence(evidence));
+    });
 
   const resolve = program.command("resolve").description("Return ranked identity candidates");
   for (const entityType of ["work", "character"] as const) {
@@ -49,39 +60,77 @@ export function createCli(options: CliOptions = {}): Command {
       .option("--providers <ids>", "Comma-separated provider IDs", parseList)
       .option("--work <external-id>", "Known work ID for character resolution", parseExternalId)
       .option("--json", "Emit JSON")
+      .option("--full-files", "Include every parsed file path")
       .action(
         async (
           input: string,
-          commandOptions: { top: number; providers?: string[]; work?: ExternalId },
+          commandOptions: {
+            top: number;
+            providers?: string[];
+            work?: ExternalId;
+            fullFiles?: boolean;
+          },
         ) => {
+          const resolver = await loadResolver();
+          const result = await resolver.resolve({
+            entityType,
+            input,
+            limit: commandOptions.top,
+            ...(commandOptions.providers ? { providers: commandOptions.providers } : {}),
+            ...(commandOptions.work ? { work: commandOptions.work } : {}),
+          });
           writeJson(
             stdout,
-            await resolver.resolve({
-              entityType,
-              input,
-              limit: commandOptions.top,
-              ...(commandOptions.providers ? { providers: commandOptions.providers } : {}),
-              ...(commandOptions.work ? { work: commandOptions.work } : {}),
-            }),
+            commandOptions.fullFiles ? result : compactResolveResult(result),
           );
         },
       );
   }
 
-  const providerCommand = program.command("providers").description("Inspect provider capabilities");
+  const providerCommand = program.command("provider").description("Manage provider capabilities and data");
+  addProviderList(providerCommand, stdout, options.providers, providerManager);
   providerCommand
-    .command("list")
+    .command("install")
+    .argument("<provider-or-path>")
+    .option("--trust-local", "Allow executing provider code from a local directory")
     .option("--json", "Emit JSON")
-    .action(() => writeJson(stdout, { providers: resolver.listProviders() }));
+    .action(async (providerOrPath: string, commandOptions: { trustLocal?: boolean }) => {
+      writeJson(
+        stdout,
+        await providerManager.install(providerOrPath, {
+          ...(commandOptions.trustLocal ? { trustLocal: true } : {}),
+        }),
+      );
+    });
+  providerCommand
+    .command("init")
+    .argument("<provider>")
+    .option("--archive <path>", "Bangumi Archive dump ZIP")
+    .option("--token <token>", "Provider access token")
+    .option("--json", "Emit JSON")
+    .action(async (provider: string, commandOptions: { archive?: string; token?: string }) => {
+      writeJson(
+        stdout,
+        await providerManager.init(provider, {
+          ...(commandOptions.archive ? { archive: commandOptions.archive } : {}),
+          ...(commandOptions.token ? { token: commandOptions.token } : {}),
+        }),
+      );
+    });
+
+  const legacyProviders = program.command("providers").description("Alias for provider inspection");
+  addProviderList(legacyProviders, stdout, options.providers, providerManager);
 
   const entity = program.command("entity").description("Fetch a provider entity by external ID");
   entity
     .command("get")
     .argument("<entity-type>", "work or character", parseEntityType)
     .argument("<external-id>", "for example bangumi:400602 or tmdb:209867", parseExternalId)
+    .option("--provider <id>", "Provider to use for a shared external ID namespace")
     .option("--json", "Emit JSON")
-    .action(async (entityType: EntityType, id: ExternalId) => {
-      const provider = providerForId(providers, id);
+    .action(async (entityType: EntityType, id: ExternalId, commandOptions: { provider?: string }) => {
+      const providers = await loadProviders();
+      const provider = providerForId(providers, id, commandOptions.provider);
       if (!provider?.getEntity) throw new Error(`No provider can fetch ${id.source}:${id.id}`);
       writeJson(stdout, await provider.getEntity(id, entityType));
     });
@@ -90,14 +139,20 @@ export function createCli(options: CliOptions = {}): Command {
   work
     .command("characters")
     .argument("<external-id>", "for example bangumi:400602", parseExternalId)
+    .option("--provider <id>", "Provider to use for a shared external ID namespace")
     .option("--json", "Emit JSON")
-    .action(async (id: ExternalId) => {
-      const provider = providerForId(providers, id);
+    .action(async (id: ExternalId, commandOptions: { provider?: string }) => {
+      const providers = await loadProviders();
+      const provider = providerForId(providers, id, commandOptions.provider);
       if (!provider?.listWorkCharacters) {
         throw new Error(`No provider can list characters for ${id.source}:${id.id}`);
       }
       writeJson(stdout, await provider.listWorkCharacters(id));
     });
+
+  program.hook("postAction", async () => {
+    if (hostPromise) await (await hostPromise).dispose();
+  });
 
   return program;
 }
@@ -161,8 +216,70 @@ export function parseExternalId(value: string): ExternalId {
   return { source, id };
 }
 
-function providerForId(providers: Provider[], id: ExternalId): Provider | undefined {
-  return providers.find((provider) => provider.manifest.id === id.source);
+function addProviderList(
+  command: Command,
+  stdout: NodeJS.WritableStream,
+  injectedProviders: Provider[] | undefined,
+  providerManager: ProviderManager,
+): void {
+  command
+    .command("list")
+    .option("--json", "Emit JSON")
+    .action(async () => {
+      writeJson(stdout, {
+        providers: injectedProviders
+          ? injectedProviders.map((provider) => provider.manifest)
+          : await providerManager.list(),
+      });
+    });
+}
+
+function providerForId(
+  providers: Provider[],
+  id: ExternalId,
+  providerId?: string,
+): Provider | undefined {
+  if (providerId) {
+    const provider = providers.find((candidate) => candidate.manifest.id === providerId);
+    if (!provider) throw new Error(`Unknown provider: ${providerId}`);
+    return provider;
+  }
+  return (
+    providers.find((provider) => provider.manifest.id === id.source) ??
+    providers.find(
+      (provider) => provider.manifest.id === "bangumi-archive" && id.source === "bangumi",
+    )
+  );
+}
+
+export function compactQueryFiles(files: string[]): {
+  fileCount: number;
+  files: string[];
+  filesTruncated: boolean;
+} {
+  const limit = 8;
+  return {
+    fileCount: files.length,
+    files: files.slice(0, limit),
+    filesTruncated: files.length > limit,
+  };
+}
+
+function compactEvidence<T extends { files: string[] }>(evidence: T): Omit<T, "files"> & {
+  fileCount: number;
+  files: string[];
+  filesTruncated: boolean;
+} {
+  return { ...evidence, ...compactQueryFiles(evidence.files) };
+}
+
+function compactResolveResult(result: ResolveResult): ResolveResult & {
+  query: ResolveResult["query"] & { fileCount: number; filesTruncated: boolean };
+} {
+  return {
+    ...result,
+    query: compactEvidence(result.query),
+  };
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";

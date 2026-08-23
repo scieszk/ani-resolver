@@ -1,8 +1,10 @@
 import { Writable } from "node:stream";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { createCli, parseExternalId, runCli } from "../src/cli.js";
+import { compactQueryFiles, createCli, parseExternalId, runCli } from "../src/cli.js";
+import { ProviderManager } from "../src/provider-management.js";
 import type {
   ExternalId,
   Provider,
@@ -89,10 +91,46 @@ class CliProvider implements Provider {
   }
 }
 
+class AlternateCliProvider extends CliProvider {
+  override readonly manifest: ProviderManifest = {
+    id: "fixture-local",
+    label: "Fixture Local",
+    mediaTypes: ["anime"],
+    capabilities: ["work_characters"],
+    languages: ["en"],
+    auth: "none",
+    strengths: ["tests"],
+    limitations: [],
+  };
+
+  override async listWorkCharacters(_work: ExternalId) {
+    return {
+      provider: "fixture-local",
+      status: "ok" as const,
+      items: [
+        {
+          entityType: "character" as const,
+          provider: "fixture-local",
+          providerId: "local-2",
+          names: ["Local Character"],
+          externalIds: [{ source: "fixture", id: "local-2" }],
+          providerScore: 0.9,
+          facts: {},
+          evidence: [],
+        },
+      ],
+    };
+  }
+}
+
 async function run(args: string[]) {
+  return runWithProviders(args, [new CliProvider()]);
+}
+
+async function runWithProviders(args: string[], providers: Provider[]) {
   const stdout = new MemoryStream();
   const stderr = new MemoryStream();
-  const cli = createCli({ providers: [new CliProvider()], stdout, stderr });
+  const cli = createCli({ providers, stdout, stderr });
   await cli.parseAsync(args, { from: "user" });
   return { stdout: stdout.value, stderr: stderr.value };
 }
@@ -107,7 +145,7 @@ describe("CLI", () => {
   });
 
   it("lists provider capability manifests without orchestration hints", async () => {
-    const result = await run(["providers", "list", "--json"]);
+    const result = await run(["provider", "list", "--json"]);
     const output = JSON.parse(result.stdout);
 
     expect(output.providers[0]).toMatchObject({
@@ -115,6 +153,42 @@ describe("CLI", () => {
       capabilities: ["work_search", "work_detail", "work_characters", "character_search"],
     });
     expect(result.stdout).not.toContain("recommended_disambiguators");
+  });
+
+  it("returns initialization requirements without an interactive prompt", async () => {
+    const stdout = new MemoryStream();
+    const stderr = new MemoryStream();
+    const providerManager = new ProviderManager({
+      home: path.join(process.cwd(), ".test-provider-home-does-not-need-to-exist"),
+    });
+    const cli = createCli({ providers: [new CliProvider()], providerManager, stdout, stderr });
+
+    await cli.parseAsync(["provider", "init", "bangumi-archive", "--json"], { from: "user" });
+
+    expect(JSON.parse(stdout.value)).toMatchObject({
+      provider: "bangumi-archive",
+      status: "needs_input",
+      required: ["archive"],
+    });
+  });
+
+  it("compacts large file evidence for agent-facing output", () => {
+    const files = Array.from({ length: 100 }, (_, index) => `Episode ${index + 1}.mkv`);
+
+    expect(compactQueryFiles(files)).toEqual({
+      fileCount: 100,
+      files: [
+        "Episode 1.mkv",
+        "Episode 2.mkv",
+        "Episode 3.mkv",
+        "Episode 4.mkv",
+        "Episode 5.mkv",
+        "Episode 6.mkv",
+        "Episode 7.mkv",
+        "Episode 8.mkv",
+      ],
+      filesTruncated: true,
+    });
   });
 
   it("parses release evidence as JSON", async () => {
@@ -147,6 +221,18 @@ describe("CLI", () => {
 
     expect(entity.items[0]).toMatchObject({ entityType: "work", providerId: "1" });
     expect(characters.items[0]).toMatchObject({ entityType: "character", providerId: "2" });
+  });
+
+  it("selects an explicit provider for a shared external ID namespace", async () => {
+    const result = await runWithProviders(
+      ["work", "characters", "fixture:1", "--provider", "fixture-local", "--json"],
+      [new CliProvider(), new AlternateCliProvider()],
+    );
+
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      provider: "fixture-local",
+      items: [expect.objectContaining({ providerId: "local-2" })],
+    });
   });
 
   it("emits structured JSON and a nonzero code for runtime errors", async () => {

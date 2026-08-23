@@ -91,6 +91,54 @@ describe("Resolver", () => {
     expect(result.providerRuns[0]).toHaveProperty("itemCount", 1);
   });
 
+  it("fuses the same external ID when only one provider knows its media kind", async () => {
+    const online = new FakeProvider(manifest("bangumi"), {
+      provider: "bangumi",
+      status: "ok",
+      items: [
+        {
+          entityType: "work",
+          provider: "bangumi",
+          providerId: "395378",
+          names: ["迷宫饭"],
+          externalIds: [{ source: "bangumi", id: "395378" }],
+          mediaKind: "tv",
+          providerScore: 0.9,
+          facts: {},
+          evidence: [],
+        },
+      ],
+    });
+    const archive = new FakeProvider(manifest("bangumi-archive"), {
+      provider: "bangumi-archive",
+      status: "ok",
+      items: [
+        {
+          entityType: "work",
+          provider: "bangumi-archive",
+          providerId: "395378",
+          names: ["ダンジョン飯"],
+          externalIds: [{ source: "bangumi", id: "395378", mediaKind: "tv" }],
+          mediaKind: "tv",
+          providerScore: 0.88,
+          facts: {},
+          evidence: [],
+        },
+      ],
+    });
+
+    const result = await new Resolver([online, archive]).resolve({
+      entityType: "work",
+      input: "Dungeon Meshi",
+    });
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]?.sources).toEqual(["bangumi", "bangumi-archive"]);
+    expect(result.candidates[0]?.externalIds).toEqual([
+      { source: "bangumi", id: "395378", mediaKind: "tv" },
+    ]);
+  });
+
   it("isolates provider failures and still returns other candidates", async () => {
     const failed = new FakeProvider(manifest("failed"), {
       provider: "failed",

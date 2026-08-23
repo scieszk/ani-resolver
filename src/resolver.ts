@@ -245,10 +245,7 @@ function canMerge(left: ProviderCandidate, right: ProviderCandidate, query: Reso
 
 function resolveCluster(cluster: ProviderCandidate[], query: ResolveQuery): ResolvedCandidate {
   const names = unique(cluster.flatMap((candidate) => candidate.names));
-  const externalIds = uniqueBy(
-    cluster.flatMap((candidate) => candidate.externalIds),
-    (item) => `${item.source}:${item.mediaKind ?? "unknown"}:${item.id}`,
-  );
+  const externalIds = mergeExternalIds(cluster.flatMap((candidate) => candidate.externalIds));
   const sources = unique(cluster.map((candidate) => candidate.provider));
   const evidence: SourceEvidence[] = cluster.flatMap((candidate) => [
     {
@@ -340,9 +337,29 @@ function sharesExternalId(left: ExternalId[], right: ExternalId[]): boolean {
       (b) =>
         a.source === b.source &&
         a.id === b.id &&
-        a.mediaKind === b.mediaKind,
+        (a.mediaKind === undefined || b.mediaKind === undefined || a.mediaKind === b.mediaKind),
     ),
   );
+}
+
+function mergeExternalIds(items: ExternalId[]): ExternalId[] {
+  const merged: ExternalId[] = [];
+  for (const item of items) {
+    const index = merged.findIndex(
+      (existing) =>
+        existing.source === item.source &&
+        existing.id === item.id &&
+        (existing.mediaKind === undefined ||
+          item.mediaKind === undefined ||
+          existing.mediaKind === item.mediaKind),
+    );
+    if (index === -1) {
+      merged.push(item);
+    } else if (merged[index]?.mediaKind === undefined && item.mediaKind !== undefined) {
+      merged[index] = item;
+    }
+  }
+  return merged;
 }
 
 export function normalizeName(value: string): string {
