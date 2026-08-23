@@ -30,7 +30,10 @@ const subjectSchema = z
     id: z.number(),
     name: z.string(),
     name_cn: z.string().optional(),
-    date: z.string().optional(),
+    date: z
+      .string()
+      .nullish()
+      .transform((value) => value ?? undefined),
     platform: z.string().optional(),
     summary: z.string().optional(),
     infobox: infoboxSchema,

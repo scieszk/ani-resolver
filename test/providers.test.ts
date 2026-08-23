@@ -119,6 +119,51 @@ describe("BangumiProvider", () => {
     });
   });
 
+  it("accepts a null release date in Bangumi work search results", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: 395378,
+              name: "ダンジョン飯",
+              name_cn: "迷宫饭",
+              date: "2024-01-04",
+              platform: "TV",
+              summary: "",
+              infobox: [],
+              images: null,
+              type: 2,
+            },
+            {
+              id: 999999,
+              name: "Dungeon Meshi related entry",
+              name_cn: "",
+              date: null,
+              platform: "TV",
+              summary: "",
+              infobox: [],
+              images: null,
+              type: 2,
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const result = await new BangumiProvider({ fetcher }).searchWorks({
+      entityType: "work",
+      text: "Dungeon Meshi",
+      title: "Dungeon Meshi",
+      limit: 5,
+    });
+
+    expect(result).toMatchObject({ status: "ok" });
+    expect(result.items).toHaveLength(2);
+    expect(result.items[1]).not.toHaveProperty("year");
+  });
+
   it("normalizes character records and source facts", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
