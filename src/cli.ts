@@ -107,13 +107,15 @@ export function createCli(options: CliOptions = {}): Command {
     .argument("<provider>")
     .option("--archive <path>", "Bangumi Archive dump ZIP")
     .option("--token <token>", "Provider access token")
+    .option("--api-key <key>", "Provider API key")
     .option("--json", "Emit JSON")
-    .action(async (provider: string, commandOptions: { archive?: string; token?: string }) => {
+    .action(async (provider: string, commandOptions: { archive?: string; token?: string; apiKey?: string }) => {
       writeJson(
         stdout,
         await providerManager.init(provider, {
           ...(commandOptions.archive ? { archive: commandOptions.archive } : {}),
           ...(commandOptions.token ? { token: commandOptions.token } : {}),
+          ...(commandOptions.apiKey ? { apiKey: commandOptions.apiKey } : {}),
         }),
       );
     });

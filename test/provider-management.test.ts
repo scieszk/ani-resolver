@@ -101,6 +101,22 @@ describe("ProviderManager", () => {
     await expect(credentials.get("tmdb", "access-token")).resolves.toBe("secret-token");
   });
 
+  it("stores a TMDB v3 API key through the credential store", async () => {
+    const values = new Map<string, string>();
+    const credentials = {
+      get: async (provider: string, name: string) => values.get(`${provider}:${name}`),
+      set: async (provider: string, name: string, value: string) => {
+        values.set(`${provider}:${name}`, value);
+      },
+    };
+    const manager = new ProviderManager({ home: await temporaryHome(), credentials });
+
+    const result = await manager.init("tmdb", { apiKey: "secret-api-key" });
+
+    expect(result).toMatchObject({ provider: "tmdb", status: "ready" });
+    await expect(credentials.get("tmdb", "api-key")).resolves.toBe("secret-api-key");
+  });
+
   it("loads ready bundled providers through the Cordis host", async () => {
     const manager = new ProviderManager({ home: await temporaryHome() });
 

@@ -12,7 +12,7 @@ node .\dist\cli.js provider list --json
 
 Use `ani-resolver` instead of `node .\dist\cli.js` after `npm link` or package installation.
 
-Set `TMDB_ACCESS_TOKEN`, then run `ani-resolver provider init tmdb --json` to save it in the OS credential store. `BANGUMI_ACCESS_TOKEN` is optional for public reads.
+Set `TMDB_ACCESS_TOKEN` or `TMDB_API_KEY`, then run `ani-resolver provider init tmdb --json` to save it in the OS credential store. `BANGUMI_ACCESS_TOKEN` is optional for public reads.
 
 Node 24 can use an environment proxy when started with both settings:
 
@@ -32,6 +32,7 @@ ani-resolver provider list --json
 ani-resolver provider install <catalog-provider> --json
 ani-resolver provider install <local-directory> --trust-local --json
 ani-resolver provider init tmdb --token <access-token> --json
+ani-resolver provider init tmdb --api-key <api-key> --json
 ani-resolver provider init bangumi-archive --archive <dump.zip> --json
 ani-resolver parse <text-or-path-or-magnet> --json
 ani-resolver resolve work <input> --top 5 --providers bangumi,tmdb --json

@@ -11,7 +11,7 @@ The project has two deliberately separate layers:
 
 - Node.js 24 or newer
 - A descriptive project User-Agent for Bangumi, supplied by the built-in provider
-- `TMDB_ACCESS_TOKEN` or a token stored by `provider init tmdb` for TMDB requests
+- `TMDB_ACCESS_TOKEN`, `TMDB_API_KEY`, or a credential stored by `provider init tmdb` for TMDB requests
 
 When the network requires a proxy, start Node with `NODE_USE_ENV_PROXY=1` and set `HTTPS_PROXY` to the user's proxy URL. A provider connection failure does not mean the title has no matches.
 
@@ -29,6 +29,7 @@ npm link
 ani-resolver provider list --json
 ani-resolver provider init bangumi-archive --archive /path/to/dump.zip --json
 ani-resolver provider init tmdb --token "$TMDB_ACCESS_TOKEN" --json
+ani-resolver provider init tmdb --api-key "$TMDB_API_KEY" --json
 ani-resolver parse "[VCB-Studio] Sousou no Frieren [01][1080p].mkv" --json
 ani-resolver resolve work "葬送的芙莉莲 (2023)" --top 5 --json
 ani-resolver resolve character "艾拉" --providers bangumi --top 5 --json

@@ -296,6 +296,27 @@ describe("TmdbProvider", () => {
     expect(new URL(String(fetcher.mock.calls[0]?.[0])).searchParams.has("year")).toBe(false);
   });
 
+  it("uses a TMDB v3 API key when no access token is configured", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ results: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const result = await new TmdbProvider({ token: "", apiKey: "api-key", fetcher }).searchWorks({
+      entityType: "work",
+      text: "Frieren",
+      title: "Frieren",
+      limit: 5,
+    });
+
+    expect(result.status).toBe("empty");
+    const [input, init] = fetcher.mock.calls[0] ?? [];
+    expect(new URL(String(input)).searchParams.get("api_key")).toBe("api-key");
+    expect(new Headers(init?.headers).get("authorization")).toBeNull();
+  });
+
   it("fetches a TMDB work using the media kind carried by its external ID", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

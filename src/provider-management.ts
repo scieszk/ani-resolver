@@ -37,6 +37,7 @@ export interface ProviderListItem extends ProviderManifest {
 export interface ProviderInitOptions {
   archive?: string;
   token?: string;
+  apiKey?: string;
 }
 
 export type ProviderInitResult =
@@ -198,16 +199,28 @@ export class ProviderManager {
         options.token ??
         process.env.TMDB_ACCESS_TOKEN ??
         (await this.credentials.get("tmdb", "access-token"));
-      if (!token) {
+      const apiKey =
+        options.apiKey ??
+        process.env.TMDB_API_KEY ??
+        (await this.credentials.get("tmdb", "api-key"));
+      if (!token && !apiKey) {
         return {
           provider,
           status: "needs_input",
-          required: ["token"],
-          acceptedOptions: ["--token <access-token>", "TMDB_ACCESS_TOKEN"],
+          required: ["token_or_api_key"],
+          acceptedOptions: [
+            "--token <access-token>",
+            "--api-key <api-key>",
+            "TMDB_ACCESS_TOKEN",
+            "TMDB_API_KEY",
+          ],
         };
       }
-      if (options.token || process.env.TMDB_ACCESS_TOKEN) {
+      if (token && (options.token || process.env.TMDB_ACCESS_TOKEN)) {
         await this.credentials.set("tmdb", "access-token", token);
+      }
+      if (apiKey && (options.apiKey || process.env.TMDB_API_KEY)) {
+        await this.credentials.set("tmdb", "api-key", apiKey);
       }
     }
 
@@ -231,6 +244,7 @@ export class ProviderManager {
     const host = new ProviderHost();
     try {
       let token = process.env.TMDB_ACCESS_TOKEN;
+      let apiKey = process.env.TMDB_API_KEY;
       if (!token) {
         try {
           token = await this.credentials.get("tmdb", "access-token");
@@ -238,10 +252,22 @@ export class ProviderManager {
           token = undefined;
         }
       }
+      if (!apiKey) {
+        try {
+          apiKey = await this.credentials.get("tmdb", "api-key");
+        } catch {
+          apiKey = undefined;
+        }
+      }
       const archiveIndex = await this.archiveIndexPath();
       await host.use((context) => {
         context.providers.add(new BangumiProvider());
-        context.providers.add(new TmdbProvider({ ...(token ? { token } : {}) }));
+        context.providers.add(
+          new TmdbProvider({
+            ...(token ? { token } : {}),
+            ...(apiKey ? { apiKey } : {}),
+          }),
+        );
         if (archiveIndex) {
           context.providers.add(new BangumiArchiveProvider({ indexPath: archiveIndex }));
         }
@@ -317,7 +343,9 @@ export class ProviderManager {
 
   private isInitialized(provider: string, state: ProviderState | undefined): boolean {
     if (provider === "bangumi") return true;
-    if (provider === "tmdb") return Boolean(state?.initialized || process.env.TMDB_ACCESS_TOKEN);
+    if (provider === "tmdb") {
+      return Boolean(state?.initialized || process.env.TMDB_ACCESS_TOKEN || process.env.TMDB_API_KEY);
+    }
     return Boolean(state?.initialized && state.indexPath);
   }
 

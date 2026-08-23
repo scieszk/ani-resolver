@@ -32,6 +32,7 @@ type TmdbWorkSearchResult = TmdbSearchResult & { media_type: "tv" | "movie" };
 
 export interface TmdbProviderOptions {
   token?: string;
+  apiKey?: string;
   fetcher?: typeof fetch;
   baseUrl?: string;
   language?: string;
@@ -52,19 +53,21 @@ export class TmdbProvider implements Provider {
   };
 
   private readonly token: string;
+  private readonly apiKey: string;
   private readonly fetcher: typeof fetch;
   private readonly baseUrl: string;
   private readonly language: string;
 
   constructor(options: TmdbProviderOptions = {}) {
     this.token = options.token ?? process.env.TMDB_ACCESS_TOKEN ?? "";
+    this.apiKey = options.apiKey ?? process.env.TMDB_API_KEY ?? "";
     this.fetcher = options.fetcher ?? fetch;
     this.baseUrl = options.baseUrl ?? "https://api.themoviedb.org/3";
     this.language = options.language ?? "zh-CN";
   }
 
   async searchWorks(query: ResolveQuery): Promise<ProviderRun<ProviderCandidate>> {
-    if (!this.token) {
+    if (!this.hasCredentials()) {
       return {
         provider: this.manifest.id,
         status: "auth_required",
@@ -77,8 +80,9 @@ export class TmdbProvider implements Provider {
     url.searchParams.set("query", query.title ?? query.text);
     url.searchParams.set("language", this.language);
     url.searchParams.set("include_adult", "false");
+    this.applyApiKey(url);
     const result = await requestJson(this.manifest.id, this.fetcher, url, {
-      headers: { accept: "application/json", authorization: `Bearer ${this.token}` },
+      headers: this.headers(),
     });
     if (!result.ok) return result.run;
 
@@ -105,7 +109,7 @@ export class TmdbProvider implements Provider {
         message: "TMDB provider only fetches TMDB work IDs",
       };
     }
-    if (!this.token) {
+    if (!this.hasCredentials()) {
       return {
         provider: this.manifest.id,
         status: "auth_required",
@@ -122,11 +126,15 @@ export class TmdbProvider implements Provider {
       };
     }
 
+    const url = new URL(
+      `${this.baseUrl}/${id.mediaKind}/${encodeURIComponent(id.id)}?language=${encodeURIComponent(this.language)}`,
+    );
+    this.applyApiKey(url);
     const result = await requestJson(
       this.manifest.id,
       this.fetcher,
-      `${this.baseUrl}/${id.mediaKind}/${encodeURIComponent(id.id)}?language=${encodeURIComponent(this.language)}`,
-      { headers: { accept: "application/json", authorization: `Bearer ${this.token}` } },
+      url,
+      { headers: this.headers() },
     );
     if (!result.ok) return result.run;
     const parsed = tmdbResultSchema.safeParse({ ...asObject(result.data), media_type: id.mediaKind });
@@ -148,6 +156,21 @@ export class TmdbProvider implements Provider {
           limit: 1,
         }, 0),
       ],
+    };
+  }
+
+  private hasCredentials(): boolean {
+    return Boolean(this.token || this.apiKey);
+  }
+
+  private applyApiKey(url: URL): void {
+    if (!this.token && this.apiKey) url.searchParams.set("api_key", this.apiKey);
+  }
+
+  private headers(): Record<string, string> {
+    return {
+      accept: "application/json",
+      ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
     };
   }
 }
