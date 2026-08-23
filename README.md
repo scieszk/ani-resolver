@@ -142,3 +142,18 @@ Tests use recorded fixtures and injected `fetch`; normal test runs do not call l
 - [TMDB API](https://developer.themoviedb.org/)
 
 Provider data remains subject to its upstream terms and attribution requirements. This repository does not redistribute upstream datasets or images.
+
+## AstrBot Integration
+
+The bundled AstrBot plugin exposes six constrained LLM tools for provider inspection, parsing, work and character resolution, entity lookup, and work-character listing. It also bundles an AstrBot-native `resolve-anime-content` skill that orchestrates those tools without depending on Codex or HAPI.
+
+The plugin lives at `integrations/astrbot/astrbot_plugin_ani_resolver`. Mount the installed ani-resolver directory into the AstrBot container at the same path, read-only, then copy the plugin into AstrBot's persistent `data/plugins` directory:
+
+```yaml
+services:
+  astrbot:
+    volumes:
+      - /srv/ani-resolver:/srv/ani-resolver:ro
+```
+
+The integration invokes the fixed `/srv/ani-resolver/bin/ani-resolver` executable with an argv array. It does not pass model input through a shell.
