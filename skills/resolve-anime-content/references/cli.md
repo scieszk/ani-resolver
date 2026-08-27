@@ -36,12 +36,16 @@ ani-resolver provider init tmdb --api-key <api-key> --json
 ani-resolver provider init bangumi-archive --archive <dump.zip> --json
 ani-resolver parse <text-or-path-or-magnet> --json
 ani-resolver resolve work <input> --top 5 --providers bangumi,tmdb --json
-ani-resolver resolve character <input> --top 5 --providers bangumi --json
+ani-resolver resolve character <input> --top 5 --providers wikidata,anilist,bangumi --json
 ani-resolver resolve character <clue> --work bangumi:400602 --top 5 --json
+ani-resolver resolve character "white hair twintails" --providers wikidata --top 5 --json
 ani-resolver entity get work bangumi:400602 --provider bangumi-archive --json
 ani-resolver entity get character bangumi:12080 --json
+ani-resolver entity get character anilist:176754 --json
+ani-resolver entity get character wikidata:Q104144455 --json
 ani-resolver entity get work tmdb-tv:209867 --json
 ani-resolver work characters bangumi:400602 --provider bangumi-archive --json
+ani-resolver work characters anilist:154587 --provider anilist --json
 ```
 
 Use `tmdb-tv:<id>` or `tmdb-movie:<id>` for details because TMDB has separate numeric namespaces. `bgm:<id>` is accepted as an alias for `bangumi:<id>`.
@@ -64,6 +68,6 @@ Bangumi API and Bangumi Archive share the `bangumi:<id>` namespace. Use `--provi
 - `candidates[].sources`: providers represented in the merged candidate.
 - `providerRuns`: one concise status per selected provider, including `itemCount`, errors, auth requirements, and elapsed time.
 
-Character text search quality depends on the provider. Bangumi is useful for names, summaries, work relations, and credits but is not a complete structured appearance index.
+`facts.appearance` contains normalized traits when a provider exposes structured statements or useful profile text. Wikidata is the primary structured appearance source; AniList, Bangumi, and Bangumi Archive derive only the traits present in their text. Inspect `appearance_match` evidence and treat `missing` as absent evidence rather than a contradiction.
 
 Successful commands write JSON to stdout. Errors write `ani-resolver.error.v1` JSON to stderr and return a nonzero exit code. An unknown provider is an error; `empty` means selected providers ran successfully but found no candidates.

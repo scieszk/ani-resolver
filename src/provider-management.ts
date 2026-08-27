@@ -7,12 +7,14 @@ import { z } from "zod";
 
 import { KeyringCredentialStore, type CredentialStore } from "./credentials.js";
 import { ProviderHost, type ProviderPlugin } from "./provider-host.js";
+import { AniListProvider } from "./providers/anilist.js";
 import {
   BangumiArchiveProvider,
   bangumiArchiveManifest,
 } from "./providers/bangumi-archive.js";
 import { BangumiProvider } from "./providers/bangumi.js";
 import { TmdbProvider } from "./providers/tmdb.js";
+import { WikidataProvider } from "./providers/wikidata.js";
 import type { ProviderManifest } from "./types.js";
 
 const providerPackageManifestSchema = z.object({
@@ -77,6 +79,8 @@ export class ProviderManager {
   private readonly bundled = [
     new BangumiProvider().manifest,
     new TmdbProvider().manifest,
+    new AniListProvider().manifest,
+    new WikidataProvider().manifest,
     bangumiArchiveManifest,
   ];
 
@@ -268,6 +272,8 @@ export class ProviderManager {
             ...(apiKey ? { apiKey } : {}),
           }),
         );
+        context.providers.add(new AniListProvider());
+        context.providers.add(new WikidataProvider());
         if (archiveIndex) {
           context.providers.add(new BangumiArchiveProvider({ indexPath: archiveIndex }));
         }
@@ -342,6 +348,8 @@ export class ProviderManager {
   }
 
   private isInitialized(provider: string, state: ProviderState | undefined): boolean {
+    const manifest = this.bundled.find((item) => item.id === provider);
+    if (manifest?.auth === "none" && provider !== "bangumi-archive") return true;
     if (provider === "bangumi") return true;
     if (provider === "tmdb") {
       return Boolean(state?.initialized || process.env.TMDB_ACCESS_TOKEN || process.env.TMDB_API_KEY);

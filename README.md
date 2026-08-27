@@ -33,8 +33,10 @@ ani-resolver provider init tmdb --api-key "$TMDB_API_KEY" --json
 ani-resolver parse "[VCB-Studio] Sousou no Frieren [01][1080p].mkv" --json
 ani-resolver resolve work "葬送的芙莉莲 (2023)" --top 5 --json
 ani-resolver resolve character "艾拉" --providers bangumi --top 5 --json
-ani-resolver resolve character "白发 双马尾" --work bangumi:400602 --top 5 --json
+ani-resolver resolve character "女主 白发 双马尾 前期没什么表情" --providers wikidata,anilist,bangumi --top 5 --json
+ani-resolver resolve character "白发 双马尾" --work anilist:154587 --top 5 --json
 ani-resolver entity get work bangumi:400602 --json
+ani-resolver entity get character wikidata:Q104144455 --json
 ani-resolver entity get work tmdb-tv:209867 --json
 ani-resolver work characters bangumi:400602 --provider bangumi-archive --json
 ```
@@ -49,11 +51,13 @@ Magnet parsing uses the full input in memory, but emitted evidence removes track
 
 ## Providers
 
-| Provider | Work search | Work detail | Character search | Work characters | Authentication |
-| --- | --- | --- | --- | --- | --- |
-| Bangumi API | yes | yes | yes | yes | optional |
-| TMDB | yes | yes | no | no | required |
-| Bangumi Archive | yes | yes | yes | yes | none |
+| Provider | Work search | Work detail | Character search | Appearance search | Work characters | Authentication |
+| --- | --- | --- | --- | --- | --- | --- |
+| Bangumi API | yes | yes | yes | text-derived | yes | optional |
+| TMDB | yes | yes | no | no | no | required |
+| AniList | yes | yes | yes | text-derived | yes | none |
+| Wikidata | no | no | yes | structured | yes | none |
+| Bangumi Archive | yes | yes | yes | text-derived | yes | none |
 
 Run `ani-resolver provider list --json` for machine-readable capabilities, lifecycle status, strengths, limitations, languages, attribution, and authentication requirements. Provider code can be bundled while provider data still reports `needs_init`.
 
@@ -67,7 +71,7 @@ ani-resolver resolve character "精灵" --work bangumi:395378 --providers bangum
 
 Initialization streams the dump into an anime-only SQLite FTS5 index. It retains related character text and work relations, but it cannot infer appearance traits absent from Archive text.
 
-Bangumi character search is strongest for names and indexed text. A broad description such as "white hair, twin tails, expressionless early in the story" may be weak or ambiguous until a structured trait provider is added. The CLI reports what each source actually returned; the Skill owns clarification and conversational decisions.
+Wikidata can search structured hair color, eye color, hairstyle, gender, and clothing statements and return cross-source character IDs. AniList adds profile text and work cast data. Coverage is uneven, so the CLI returns several candidates plus `facts.appearance`, matched/missing evidence, and isolated provider statuses; the Skill owns clarification and conversational decisions.
 
 `--work` is a real constraint, not a hint. Bangumi can filter characters with a Bangumi work ID; a TMDB work ID is reported as unsupported rather than silently falling back to global character search. Resolve or map the work to a Bangumi ID first when needed.
 
@@ -140,6 +144,8 @@ Tests use recorded fixtures and injected `fetch`; normal test runs do not call l
 - [Bangumi API](https://bangumi.github.io/api/)
 - [Bangumi Archive](https://github.com/bangumi/Archive)
 - [TMDB API](https://developer.themoviedb.org/)
+- [AniList GraphQL API](https://docs.anilist.co/)
+- [Wikidata](https://www.wikidata.org/)
 
 Provider data remains subject to its upstream terms and attribution requirements. This repository does not redistribute upstream datasets or images.
 

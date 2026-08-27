@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  hasAppearanceFacts,
+  parseAppearanceText,
+  scoreAppearanceMatch,
+} from "../appearance.js";
 import { normalizeName } from "../resolver.js";
 import type {
   ExternalId,
@@ -74,6 +79,7 @@ export class BangumiProvider implements Provider {
       "work_search",
       "work_detail",
       "character_search",
+      "character_appearance_search",
       "character_detail",
       "work_characters",
     ],
@@ -136,10 +142,7 @@ export class BangumiProvider implements Provider {
       return {
         ...listed,
         items: listed.items
-          .map((candidate) => ({
-            ...candidate,
-            providerScore: textScore(query.text, candidate.names, candidate.facts, candidate.providerScore),
-          }))
+          .map((candidate) => rankCharacterCandidate(candidate, query))
           .sort((left, right) => right.providerScore - left.providerScore)
           .slice(0, query.limit),
       };
@@ -262,6 +265,12 @@ function characterCandidate(
   const infobox = Object.fromEntries(
     character.infobox.map((item) => [item.key, flattenFirst(flattenInfobox(item.value))]),
   );
+  const appearance = parseAppearanceText(
+    [character.summary ?? "", ...Object.values(infobox).flatMap((value) => Array.isArray(value) ? value : [value])]
+      .join("\n"),
+  );
+  const requestedAppearance = parseAppearanceText(query.text);
+  const match = scoreAppearanceMatch(requestedAppearance, appearance);
   const base = Math.max(0.5, 0.82 - Math.min(index, 10) * 0.025);
   return {
     entityType: "character",
@@ -269,15 +278,45 @@ function characterCandidate(
     providerId: String(character.id),
     names,
     externalIds: [{ source: "bangumi", id: String(character.id) }],
-    providerScore: textScore(query.text, names, infobox, base),
+    providerScore: Math.min(
+      0.95,
+      textScore(query.text, names, infobox, base) +
+        (hasAppearanceFacts(requestedAppearance) ? match.score * 0.08 : 0),
+    ),
     facts: {
       ...infobox,
+      appearance,
       ...(infobox["性别"] !== undefined ? { gender: infobox["性别"] } : {}),
       summary: character.summary ?? "",
       role: character.relation ?? null,
       image: preferredImage(character.images) ?? null,
     },
-    evidence: [],
+    evidence: [
+      {
+        provider: "bangumi",
+        kind: "appearance_match",
+        value: match,
+        weight: match.score,
+      },
+    ],
+  };
+}
+
+function rankCharacterCandidate(candidate: ProviderCandidate, query: ResolveQuery): ProviderCandidate {
+  const requested = parseAppearanceText(query.text);
+  const appearance = parseAppearanceText(JSON.stringify(candidate.facts));
+  const match = scoreAppearanceMatch(requested, appearance);
+  return {
+    ...candidate,
+    providerScore: Math.min(
+      0.95,
+      textScore(query.text, candidate.names, candidate.facts, candidate.providerScore) +
+        (hasAppearanceFacts(requested) ? match.score * 0.08 : 0),
+    ),
+    evidence: [
+      ...candidate.evidence.filter((item) => item.kind !== "appearance_match"),
+      { provider: "bangumi", kind: "appearance_match", value: match, weight: match.score },
+    ],
   };
 }
 

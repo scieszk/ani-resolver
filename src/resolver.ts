@@ -1,5 +1,6 @@
 import { parseContentInput } from "./input.js";
 import type {
+  CharacterAppearance,
   Conflict,
   ContentEvidence,
   ExternalId,
@@ -315,6 +316,13 @@ function mergeFacts(cluster: ProviderCandidate[]): Record<string, unknown> {
   for (const candidate of cluster) {
     for (const [key, value] of Object.entries(candidate.facts)) {
       if (!(key in facts)) facts[key] = value;
+      else if (
+        key === "appearance" &&
+        isCharacterAppearance(facts[key]) &&
+        isCharacterAppearance(value)
+      ) {
+        facts[key] = mergeAppearance(facts[key], value);
+      }
       else if (JSON.stringify(facts[key]) !== JSON.stringify(value)) {
         const existing = Array.isArray(facts[key]) ? (facts[key] as unknown[]) : [facts[key]];
         facts[key] = uniqueBy([...existing, value], (item) => JSON.stringify(item));
@@ -322,6 +330,33 @@ function mergeFacts(cluster: ProviderCandidate[]): Record<string, unknown> {
     }
   }
   return facts;
+}
+
+const APPEARANCE_FIELDS = [
+  "hairColors",
+  "eyeColors",
+  "hairStyles",
+  "genders",
+  "apparentAges",
+  "clothing",
+  "traits",
+] as const;
+
+function isCharacterAppearance(value: unknown): value is CharacterAppearance {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return APPEARANCE_FIELDS.every(
+    (field) => Array.isArray(candidate[field]) && candidate[field].every((item) => typeof item === "string"),
+  );
+}
+
+function mergeAppearance(
+  left: CharacterAppearance,
+  right: CharacterAppearance,
+): CharacterAppearance {
+  return Object.fromEntries(
+    APPEARANCE_FIELDS.map((field) => [field, unique([...left[field], ...right[field]])]),
+  ) as unknown as CharacterAppearance;
 }
 
 function candidateKey(entityType: string, ids: ExternalId[], fallback: string): string {

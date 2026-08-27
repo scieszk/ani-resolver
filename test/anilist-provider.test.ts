@@ -1,0 +1,156 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { AniListProvider } from "../src/providers/anilist.js";
+
+function jsonResponse(data: unknown): Response {
+  return new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+const frieren = {
+  id: 176754,
+  name: { full: "Frieren", native: "フリーレン", alternative: ["芙莉莲"] },
+  image: { large: "https://example.test/frieren.jpg" },
+  description: "A <b>white-haired</b> elf with twintails and an expressionless face who traveled with Hero Himmel.",
+  gender: "Female",
+  age: "1000+",
+  bloodType: null,
+  favourites: 50000,
+  siteUrl: "https://anilist.co/character/176754",
+};
+
+describe("AniListProvider", () => {
+  it("maps anime work search into AniList and MAL IDs", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        data: {
+          Page: {
+            media: [
+              {
+                id: 154587,
+                idMal: 52991,
+                title: {
+                  romaji: "Sousou no Frieren",
+                  english: "Frieren: Beyond Journey's End",
+                  native: "葬送のフリーレン",
+                },
+                format: "TV",
+                startDate: { year: 2023 },
+                description: "<i>Fantasy anime</i>",
+                coverImage: { large: "https://example.test/cover.jpg" },
+                siteUrl: "https://anilist.co/anime/154587",
+                popularity: 500000,
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const provider = new AniListProvider({ fetcher });
+
+    const result = await provider.searchWorks({
+      entityType: "work",
+      text: "Frieren",
+      title: "Frieren",
+      limit: 5,
+    });
+
+    expect(result.items[0]).toMatchObject({
+      providerId: "154587",
+      names: expect.arrayContaining(["Sousou no Frieren", "葬送のフリーレン"]),
+      externalIds: expect.arrayContaining([
+        { source: "anilist", id: "154587", mediaKind: "tv" },
+        { source: "mal", id: "52991", mediaKind: "tv" },
+      ]),
+      mediaKind: "tv",
+      year: 2023,
+      facts: { description: "Fantasy anime" },
+    });
+    const [, init] = fetcher.mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body));
+    expect(body.variables).toMatchObject({ search: "Frieren", perPage: 5 });
+    expect(body.query).toContain("Page");
+  });
+
+  it("normalizes appearance clues from character descriptions", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({ data: { Page: { characters: [frieren] } } }),
+    );
+    const provider = new AniListProvider({ fetcher });
+
+    const result = await provider.searchCharacters({
+      entityType: "character",
+      text: "Frieren",
+      limit: 5,
+    });
+
+    expect(result.items[0]).toMatchObject({
+      providerId: "176754",
+      externalIds: [{ source: "anilist", id: "176754" }],
+      facts: {
+        description: "A white-haired elf with twintails and an expressionless face who traveled with Hero Himmel.",
+        appearance: expect.objectContaining({
+          hairColors: ["white"],
+          hairStyles: ["twintails"],
+          genders: ["female"],
+          traits: ["expressionless"],
+        }),
+      },
+    });
+  });
+
+  it("ranks a known work cast by appearance coverage", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        data: {
+          Media: {
+            characters: {
+              edges: [
+                {
+                  role: "MAIN",
+                  node: {
+                    ...frieren,
+                    description: "A white-haired female elf with twintails and a stoic expression.",
+                  },
+                },
+                {
+                  role: "MAIN",
+                  node: {
+                    id: 183965,
+                    name: { full: "Fern", native: "フェルン", alternative: [] },
+                    image: { large: null },
+                    description: "A young woman with long purple hair.",
+                    gender: "Female",
+                    age: "18",
+                    bloodType: null,
+                    favourites: 30000,
+                    siteUrl: "https://anilist.co/character/183965",
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    const provider = new AniListProvider({ fetcher });
+
+    const result = await provider.searchCharacters({
+      entityType: "character",
+      text: "白发 双马尾 女 无表情",
+      work: { source: "anilist", id: "154587" },
+      limit: 2,
+    });
+
+    expect(result.items.map((item) => item.providerId)).toEqual(["176754", "183965"]);
+    expect(result.items[0]?.providerScore).toBeGreaterThan(result.items[1]?.providerScore ?? 0);
+    expect(result.items[0]?.evidence).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "appearance_match", weight: 1 })]),
+    );
+    const body = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
+    expect(body.variables).toMatchObject({ id: 154587 });
+    expect(body.query).toContain("Media");
+  });
+});

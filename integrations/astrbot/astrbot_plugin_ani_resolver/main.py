@@ -19,7 +19,7 @@ from .runner import (
     "astrbot_plugin_ani_resolver",
     "scieszk",
     "为 AstrBot 提供动画作品、角色和外部 ID 的多源识别工具",
-    "0.1.0",
+    "0.2.0",
 )
 class AniResolverPlugin(Star):
     def __init__(self, context: Context):
@@ -65,7 +65,7 @@ class AniResolverPlugin(Star):
         top: int = 5,
         providers: str = "",
     ) -> str:
-        """将动画标题、发布名、路径、种子或磁力链接解析为多个作品候选及 Bangumi/TMDB ID。
+        """将动画标题、发布名、路径、种子或磁力链接解析为多个作品候选及跨源 ID。
 
         Args:
             input(string): 要识别的内容
@@ -89,11 +89,11 @@ class AniResolverPlugin(Star):
         top: int = 5,
         providers: str = "",
     ) -> str:
-        """根据角色名或文字特征返回多个角色候选；已知作品时应传入 Bangumi 作品 ID 缩小范围。
+        """根据角色名或外形特征返回多个角色候选；已知作品时应传入作品 ID 缩小范围。
 
         Args:
             input(string): 角色名或角色文字特征
-            work(string): 可选作品 ID，例如 bangumi:400602
+            work(string): 可选作品 ID，例如 bangumi:400602、anilist:154587
             top(number): 返回候选数量，1 到 20，默认 5
             providers(string): 逗号分隔的数据源 ID；留空使用全部已就绪数据源
         """
@@ -118,8 +118,8 @@ class AniResolverPlugin(Star):
 
         Args:
             entity_type(string): 实体类型，只能是 work 或 character
-            external_id(string): 外部 ID，例如 bangumi:400602、tmdb-tv:209867
-            provider(string): 可选指定数据源，例如 bangumi-archive
+            external_id(string): 外部 ID，例如 bangumi:400602、anilist:176754、wikidata:Q104144455
+            provider(string): 可选指定数据源，例如 bangumi-archive、anilist、wikidata
         """
         return await self._build_and_invoke(
             build_entity_get_args,
@@ -138,8 +138,8 @@ class AniResolverPlugin(Star):
         """列出已知动画作品中的角色，适合在角色描述含糊时缩小候选范围。
 
         Args:
-            external_id(string): Bangumi 作品 ID，例如 bangumi:400602
-            provider(string): 可选指定数据源，例如 bangumi 或 bangumi-archive
+            external_id(string): 作品 ID，例如 bangumi:400602、anilist:154587、wikidata:Q12345
+            provider(string): 可选指定数据源，例如 bangumi、bangumi-archive、anilist、wikidata
         """
         return await self._build_and_invoke(
             build_work_characters_args,

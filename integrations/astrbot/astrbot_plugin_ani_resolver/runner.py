@@ -9,7 +9,9 @@ DEFAULT_EXECUTABLE = "/srv/ani-resolver/bin/ani-resolver"
 MAX_INPUT_LENGTH = 10_000
 MAX_OUTPUT_BYTES = 512_000
 PROVIDER_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-EXTERNAL_ID = re.compile(r"^(?:bangumi|bgm|tmdb-tv|tmdb-movie):[0-9]+$")
+EXTERNAL_ID = re.compile(
+    r"^(?:(?:bangumi|bgm|tmdb-tv|tmdb-movie|anilist):[0-9]+|wikidata:Q[1-9][0-9]*)$"
+)
 
 
 def build_provider_list_args() -> list[str]:

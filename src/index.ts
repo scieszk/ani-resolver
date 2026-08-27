@@ -1,4 +1,10 @@
 export { parseContentInput } from "./input.js";
+export {
+  emptyAppearance,
+  hasAppearanceFacts,
+  parseAppearanceText,
+  scoreAppearanceMatch,
+} from "./appearance.js";
 export { KeyringCredentialStore } from "./credentials.js";
 export { ProviderHost, ProviderRegistryService } from "./provider-host.js";
 export { ProviderManager, validateProviderPackageManifest } from "./provider-management.js";
@@ -8,7 +14,13 @@ export {
   bangumiArchiveManifest,
   buildBangumiArchiveIndex,
 } from "./providers/bangumi-archive.js";
-export { BangumiProvider, TmdbProvider, createDefaultProviders } from "./providers/index.js";
+export {
+  BangumiProvider,
+  AniListProvider,
+  TmdbProvider,
+  WikidataProvider,
+  createDefaultProviders,
+} from "./providers/index.js";
 export type { CredentialStore } from "./credentials.js";
 export type { ProviderContext, ProviderPlugin } from "./provider-host.js";
 export type {

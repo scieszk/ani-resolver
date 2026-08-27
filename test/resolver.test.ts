@@ -91,6 +91,66 @@ describe("Resolver", () => {
     expect(result.providerRuns[0]).toHaveProperty("itemCount", 1);
   });
 
+  it("merges normalized appearance facts into one stable object", async () => {
+    const left = new FakeProvider(manifest("left"), {
+      provider: "left",
+      status: "ok",
+      items: [
+        {
+          entityType: "work",
+          provider: "left",
+          providerId: "1",
+          names: ["Example"],
+          externalIds: [{ source: "shared", id: "1" }],
+          providerScore: 0.8,
+          facts: {
+            appearance: {
+              hairColors: ["white"], eyeColors: [], hairStyles: ["twintails"],
+              genders: [], apparentAges: [], clothing: [], traits: [],
+            },
+          },
+          evidence: [],
+        },
+      ],
+    });
+    const right = new FakeProvider(manifest("right"), {
+      provider: "right",
+      status: "ok",
+      items: [
+        {
+          entityType: "work",
+          provider: "right",
+          providerId: "2",
+          names: ["Example"],
+          externalIds: [{ source: "shared", id: "1" }],
+          providerScore: 0.79,
+          facts: {
+            appearance: {
+              hairColors: ["silver"], eyeColors: ["green"], hairStyles: [],
+              genders: ["female"], apparentAges: [], clothing: [], traits: ["expressionless"],
+            },
+          },
+          evidence: [],
+        },
+      ],
+    });
+
+    const result = await new Resolver([left, right]).resolve({
+      entityType: "work",
+      input: "Example",
+    });
+
+    expect(result.candidates[0]?.facts.appearance).toEqual({
+      hairColors: ["white", "silver"],
+      eyeColors: ["green"],
+      hairStyles: ["twintails"],
+      genders: ["female"],
+      apparentAges: [],
+      clothing: [],
+      traits: ["expressionless"],
+    });
+  });
+
   it("fuses the same external ID when only one provider knows its media kind", async () => {
     const online = new FakeProvider(manifest("bangumi"), {
       provider: "bangumi",

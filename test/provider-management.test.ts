@@ -46,6 +46,16 @@ describe("ProviderManager", () => {
     expect(providers).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          id: "anilist",
+          initialized: true,
+          status: "ready",
+        }),
+        expect.objectContaining({
+          id: "wikidata",
+          initialized: true,
+          status: "ready",
+        }),
+        expect.objectContaining({
           id: "bangumi-archive",
           installed: true,
           initialized: false,
@@ -122,7 +132,12 @@ describe("ProviderManager", () => {
 
     const host = await manager.loadProviderHost();
 
-    expect(host.providers().map((provider) => provider.manifest.id)).toEqual(["bangumi", "tmdb"]);
+    expect(host.providers().map((provider) => provider.manifest.id)).toEqual([
+      "bangumi",
+      "tmdb",
+      "anilist",
+      "wikidata",
+    ]);
     await host.dispose();
   });
 

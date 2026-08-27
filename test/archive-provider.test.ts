@@ -57,6 +57,7 @@ async function fixture(): Promise<{ archive: string; index: string }> {
         lines([
           { subject_id: 395378, character_id: 999, type: 5, order: 0 },
           { subject_id: 395378, character_id: 120910, type: 1, order: 1 },
+          { subject_id: 395378, character_id: 130000, type: 1, order: 2 },
         ]),
       ),
       "character.jsonlines": strToU8(
@@ -77,6 +78,13 @@ async function fixture(): Promise<{ archive: string; index: string }> {
             summary: "旁白",
             infobox: "{{Infobox Crt\n|简体中文名= 旁白\n}}",
           },
+          {
+            id: 130000,
+            role: 1,
+            name: "アイラ",
+            summary: "白发双马尾的女性，前期面无表情。",
+            infobox: [{ key: "简体中文名", value: "艾拉" }],
+          },
         ]),
       ),
     }),
@@ -96,7 +104,7 @@ describe("BangumiArchiveProvider", () => {
 
     const result = await buildBangumiArchiveIndex(paths);
 
-    expect(result).toMatchObject({ subjects: 2, characters: 2, relations: 2 });
+    expect(result).toMatchObject({ subjects: 2, characters: 3, relations: 3 });
     expect(result.sourceBytes).toBeGreaterThan(0);
   });
 
@@ -154,5 +162,33 @@ describe("BangumiArchiveProvider", () => {
     });
 
     expect(result.items[0]).toMatchObject({ providerId: "120910" });
+  });
+
+  it("ranks a known work cast with cross-language normalized appearance clues", async () => {
+    const paths = await fixture();
+    await buildBangumiArchiveIndex(paths);
+    const provider = new BangumiArchiveProvider({ indexPath: paths.index });
+
+    const result = await provider.searchCharacters!({
+      entityType: "character",
+      text: "silver-haired twin tails expressionless female",
+      work: { source: "bangumi", id: "395378" },
+      limit: 3,
+    });
+
+    expect(result.items[0]).toMatchObject({
+      providerId: "130000",
+      facts: {
+        appearance: expect.objectContaining({
+          hairColors: ["white"],
+          hairStyles: ["twintails"],
+          genders: ["female"],
+          traits: ["expressionless"],
+        }),
+      },
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ kind: "appearance_match", weight: 1 }),
+      ]),
+    });
   });
 });

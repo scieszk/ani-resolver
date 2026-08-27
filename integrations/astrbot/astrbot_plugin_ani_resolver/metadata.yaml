@@ -1,6 +1,6 @@
 name: astrbot_plugin_ani_resolver
 display_name: Ani Resolver
 desc: 为 AstrBot 提供动画作品、角色和外部 ID 的多源识别工具与 Agent Skill
-version: 0.1.0
+version: 0.2.0
 author: scieszk
 repo: https://github.com/scieszk/ani-resolver

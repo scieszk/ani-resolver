@@ -6,6 +6,11 @@ import type { Readable } from "node:stream";
 
 import { open as openZip, type Entry, type ZipFile } from "yauzl";
 
+import {
+  hasAppearanceFacts,
+  parseAppearanceText,
+  scoreAppearanceMatch,
+} from "../appearance.js";
 import { normalizeName } from "../resolver.js";
 import type {
   ExternalId,
@@ -61,6 +66,7 @@ export const bangumiArchiveManifest: ProviderManifest = {
     "work_search",
     "work_detail",
     "character_search",
+    "character_appearance_search",
     "character_detail",
     "work_characters",
   ],
@@ -235,8 +241,13 @@ export class BangumiArchiveProvider implements Provider {
     }
     const database = this.open();
     try {
-      const rows = searchCharacters(database, query.text, query.limit, query.work?.id);
-      const items = rows.map((row, index) => characterCandidate(row, index));
+      const rows = query.work
+        ? workCharacterRows(database, query.work.id)
+        : searchCharacters(database, query.text, Math.max(query.limit * 4, 20), undefined);
+      const items = rows
+        .map((row, index) => characterCandidate(row, index, query))
+        .sort((left, right) => right.providerScore - left.providerScore)
+        .slice(0, query.limit);
       return run(this.manifest.id, items);
     } finally {
       database.close();
@@ -284,19 +295,7 @@ export class BangumiArchiveProvider implements Provider {
     }
     const database = this.open();
     try {
-      const rows = database
-        .prepare(
-          `SELECT c.id, c.names_json, c.facts_json, r.relation_type
-           FROM subject_characters r
-           JOIN characters c ON c.id = r.character_id
-           WHERE r.subject_id = ?
-           ORDER BY CASE CAST(r.relation_type AS INTEGER)
-             WHEN 1 THEN 0
-             WHEN 2 THEN 1
-             ELSE 2
-           END, r.sort_order, c.id`,
-        )
-        .all(work.id) as unknown as CharacterRow[];
+      const rows = workCharacterRows(database, work.id);
       return run(
         this.manifest.id,
         rows.map((row, index) => characterCandidate(row, index)),
@@ -434,19 +433,54 @@ function subjectCandidate(row: SubjectRow, query: ResolveQuery, index: number): 
   };
 }
 
-function characterCandidate(row: CharacterRow, index: number): ProviderCandidate {
+function characterCandidate(
+  row: CharacterRow,
+  index: number,
+  query?: ResolveQuery,
+): ProviderCandidate {
   const facts = parseJson<Record<string, unknown>>(row.facts_json, {});
   if (row.relation_type !== undefined && row.relation_type !== null) facts.relationType = row.relation_type;
+  const appearance = parseAppearanceText(JSON.stringify(facts));
+  facts.appearance = appearance;
+  const requestedAppearance = parseAppearanceText(query?.text ?? "");
+  const match = scoreAppearanceMatch(requestedAppearance, appearance);
+  const base = Math.max(0.55, 0.88 - index * 0.035);
   return {
     entityType: "character",
     provider: "bangumi-archive",
     providerId: String(row.id),
     names: parseJson<string[]>(row.names_json, []),
     externalIds: [{ source: "bangumi", id: String(row.id) }],
-    providerScore: Math.max(0.55, 0.88 - index * 0.035),
+    providerScore: Math.min(
+      0.96,
+      base + (hasAppearanceFacts(requestedAppearance) ? match.score * 0.17 : 0),
+    ),
     facts,
-    evidence: [],
+    evidence: [
+      {
+        provider: "bangumi-archive",
+        kind: "appearance_match",
+        value: match,
+        weight: match.score,
+      },
+    ],
   };
+}
+
+function workCharacterRows(database: DatabaseSync, workId: string): CharacterRow[] {
+  return database
+    .prepare(
+      `SELECT c.id, c.names_json, c.facts_json, r.relation_type
+       FROM subject_characters r
+       JOIN characters c ON c.id = r.character_id
+       WHERE r.subject_id = ?
+       ORDER BY CASE CAST(r.relation_type AS INTEGER)
+         WHEN 1 THEN 0
+         WHEN 2 THEN 1
+         ELSE 2
+       END, r.sort_order, c.id`,
+    )
+    .all(workId) as unknown as CharacterRow[];
 }
 
 function run(provider: string, items: ProviderCandidate[]): ProviderRun<ProviderCandidate> {

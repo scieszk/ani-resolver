@@ -5,6 +5,7 @@ export type ProviderCapability =
   | "work_search"
   | "work_detail"
   | "character_search"
+  | "character_appearance_search"
   | "character_detail"
   | "work_characters"
   | "id_mapping"
@@ -30,6 +31,22 @@ export interface SourceEvidence {
   kind: string;
   value: unknown;
   weight: number;
+}
+
+export interface CharacterAppearance {
+  hairColors: string[];
+  eyeColors: string[];
+  hairStyles: string[];
+  genders: string[];
+  apparentAges: string[];
+  clothing: string[];
+  traits: string[];
+}
+
+export interface AppearanceMatch {
+  score: number;
+  matched: string[];
+  missing: string[];
 }
 
 export interface Conflict {

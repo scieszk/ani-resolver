@@ -173,7 +173,7 @@ describe("BangumiProvider", () => {
               id: 12080,
               name: "アイラ",
               type: 1,
-              summary: "感情表达较少。",
+              summary: "白发双马尾，感情表达较少。",
               infobox: [
                 { key: "简体中文名", value: "艾拉" },
                 { key: "性别", value: "女" },
@@ -199,7 +199,16 @@ describe("BangumiProvider", () => {
       entityType: "character",
       providerId: "12080",
       names: ["アイラ", "艾拉"],
-      facts: { gender: "女", summary: "感情表达较少。" },
+      facts: {
+        gender: "女",
+        summary: "白发双马尾，感情表达较少。",
+        appearance: expect.objectContaining({
+          hairColors: ["white"],
+          hairStyles: ["twintails"],
+          genders: ["female"],
+          traits: ["expressionless"],
+        }),
+      },
     });
   });
 
