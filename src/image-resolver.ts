@@ -1,4 +1,5 @@
 import { parseImageInput, publicImageEvidence } from "./image-input.js";
+import { selectProvidersForOperation } from "./provider-selection.js";
 import type {
   ImageMatch,
   ImageQuery,
@@ -23,10 +24,14 @@ export class ImageResolver {
   }
 
   async resolve(request: ImageResolveRequest): Promise<ImageResolveResult> {
+    const providers = selectProvidersForOperation(
+      this.providers.values(),
+      request.providers,
+      "resolve.image",
+    );
     const input = await parseImageInput(request.input);
     const limit = Math.max(1, Math.min(request.limit ?? 5, 50));
     const query: ImageQuery = { input, limit };
-    const providers = this.selectProviders(request.providers);
     const runs = await Promise.all(
       providers.map((provider) => runProvider(provider, query, this.providerTimeoutMs)),
     );
@@ -44,17 +49,6 @@ export class ImageResolver {
         ...(run.elapsedMs !== undefined ? { elapsedMs: run.elapsedMs } : {}),
       })),
     };
-  }
-
-  private selectProviders(ids: string[] | undefined): Provider[] {
-    if (!ids?.length) {
-      return [...this.providers.values()].filter((provider) => Boolean(provider.searchImage));
-    }
-    const unknown = [...new Set(ids.filter((id) => !this.providers.has(id)))];
-    if (unknown.length > 0) {
-      throw new Error(`Unknown provider${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}`);
-    }
-    return ids.map((id) => this.providers.get(id)!);
   }
 }
 

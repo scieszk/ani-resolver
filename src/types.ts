@@ -167,7 +167,7 @@ export interface ImageMatch {
 export interface ImageResolveRequest {
   input: string;
   limit?: number;
-  providers?: string[];
+  providers: string[];
 }
 
 export interface ImageResolveResult {
@@ -194,7 +194,7 @@ export interface ResolveRequest {
   entityType: EntityType;
   input: string;
   limit?: number;
-  providers?: string[];
+  providers: string[];
   work?: ExternalId;
 }
 

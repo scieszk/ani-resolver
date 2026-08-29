@@ -1,14 +1,15 @@
 {
   "name": "ani-resolver",
   "version": "0.1.0",
-  "description": "Evidence-driven anime work and character identity resolver for humans and AI agents.",
+  "description": "Provider-based anime metadata resolution infrastructure.",
   "keywords": [
     "anime",
     "bangumi",
     "tmdb",
     "resolver",
-    "cli",
-    "agent-skill"
+    "metadata",
+    "provider",
+    "cli"
   ],
   "repository": {
     "type": "git",

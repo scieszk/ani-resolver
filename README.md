@@ -1,11 +1,8 @@
 # ani-resolver
 
-`ani-resolver` turns anime titles, release names, paths, torrent files, magnets, character clues, and images into ranked identity or source candidates with evidence. It returns data; it does not download, rename, move, or delete files.
+`ani-resolver` is provider-based infrastructure for anime metadata resolution. Its TypeScript library and CLI turn titles, release names, paths, torrent files, magnets, character clues, and images into ranked identity or source candidates with evidence and stable JSON.
 
-The project has two deliberately separate layers:
-
-- The Node.js/TypeScript CLI parses input, queries providers, merges identities, and emits stable JSON.
-- The bundled Skill teaches an AI agent to select providers, inspect several candidates, ask follow-up questions when needed, and hand the accepted identity to the user's own download or organization workflow.
+It returns data for callers to use. It does not search torrent sites, download content, rename files, move files, or delete files.
 
 ## Requirements
 
@@ -34,10 +31,10 @@ ani-resolver provider init tmdb --api-key "$TMDB_API_KEY" --json
 ani-resolver provider init saucenao --api-key "$SAUCENAO_API_KEY" --json
 ani-resolver provider init trace-moe --api-key "$TRACE_MOE_API_KEY" --json
 ani-resolver parse "[VCB-Studio] Sousou no Frieren [01][1080p].mkv" --json
-ani-resolver resolve work "葬送的芙莉莲 (2023)" --top 5 --json
+ani-resolver resolve work "葬送的芙莉莲 (2023)" --providers bangumi,anilist --top 5 --json
 ani-resolver resolve character "艾拉" --providers bangumi --top 5 --json
 ani-resolver resolve character "女主 白发 双马尾 前期没什么表情" --providers wikidata,anilist,bangumi --top 5 --json
-ani-resolver resolve character "白发 双马尾" --work anilist:154587 --top 5 --json
+ani-resolver resolve character "白发 双马尾" --work anilist:154587 --providers anilist --top 5 --json
 ani-resolver resolve image ./frame.jpg --providers trace-moe --top 5 --json
 ani-resolver resolve image https://example.com/artwork.jpg --providers saucenao --top 5 --json
 ani-resolver resolve image ./character.png --providers animetrace --top 5 --json
@@ -50,6 +47,8 @@ ani-resolver work characters bangumi:400602 --provider bangumi-archive --json
 `tmdb-tv:<id>` and `tmdb-movie:<id>` preserve TMDB's separate TV and movie namespaces. Existing path tags such as `[tmdbid=262929]` and `{tmdb-262929}` are recognized, with media kind inferred when the path contains useful TV or movie evidence.
 
 Successful commands emit JSON on stdout. Errors emit `ani-resolver.error.v1` JSON on stderr and use a nonzero exit code. `resolve` keeps multiple candidates unless unambiguous explicit work IDs identify one candidate; duplicate IDs from the same source remain separate possibilities. Scores are deterministic match scores, not statistical probabilities.
+
+Every `resolve work`, `resolve character`, and `resolve image` command requires an explicit `--providers` selection. Use comma-separated IDs, or pass `--providers all` to intentionally run every loaded provider compatible with that operation. `all` cannot be combined with named providers. Unknown or statically incompatible providers fail before any provider request and return a structured error such as `unknown_provider` or `unsupported_provider_capability`.
 
 Torrent and directory evidence reports `fileCount` plus up to eight representative paths by default. Add `--full-files` to `parse` or `resolve` only when every path is needed.
 
@@ -82,7 +81,7 @@ ani-resolver resolve character "精灵" --work bangumi:395378 --providers bangum
 
 Initialization streams the dump into an anime-only SQLite FTS5 index. It retains related character text and work relations, but it cannot infer appearance traits absent from Archive text.
 
-Wikidata can search structured hair color, eye color, hairstyle, gender, and clothing statements and return cross-source character IDs. AniList adds profile text and work cast data. Coverage is uneven, so the CLI returns several candidates plus `facts.appearance`, matched/missing evidence, and isolated provider statuses; the Skill owns clarification and conversational decisions.
+Wikidata can search structured hair color, eye color, hairstyle, gender, and clothing statements and return cross-source character IDs. AniList adds profile text and work cast data. Coverage is uneven, so the CLI returns several candidates plus `facts.appearance`, matched/missing evidence, and isolated provider statuses. Callers decide how to clarify or act on uncertain results.
 
 `--work` is a real constraint, not a hint. Bangumi can filter characters with a Bangumi work ID; a TMDB work ID is reported as unsupported rather than silently falling back to global character search. Resolve or map the work to a Bangumi ID first when needed.
 
@@ -163,9 +162,13 @@ Tests use recorded fixtures and injected `fetch`; normal test runs do not call l
 
 Provider data remains subject to its upstream terms and attribution requirements. This repository does not redistribute upstream datasets or images.
 
-## AstrBot Integration
+## Experimental Integrations
 
-The bundled AstrBot plugin exposes seven constrained LLM tools for provider inspection, parsing, work, character, and image resolution, entity lookup, and work-character listing. It also bundles an AstrBot-native `resolve-anime-content` skill that orchestrates those tools without depending on Codex or HAPI.
+The bundled `resolve-anime-content` Skill is an experimental example of using the CLI from an AI agent. It selects providers, inspects candidates, and keeps conversation and file operations outside the resolver. The Skill is not required to use the library or CLI.
+
+### AstrBot
+
+The experimental AstrBot plugin exposes seven constrained LLM tools for provider inspection, parsing, work, character, and image resolution, entity lookup, and work-character listing. It also bundles an AstrBot-native `resolve-anime-content` Skill that orchestrates those tools without depending on Codex or HAPI.
 
 The plugin lives at `integrations/astrbot/astrbot_plugin_ani_resolver`. Mount the installed ani-resolver directory into the AstrBot container at the same path, read-only, then copy the plugin into AstrBot's persistent `data/plugins` directory:
 

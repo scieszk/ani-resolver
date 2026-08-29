@@ -73,7 +73,7 @@ describe("ImageResolver", () => {
     );
   });
 
-  it("selects image providers by default and preserves ordered native match signals", async () => {
+  it("expands all to image-capable providers and preserves ordered native match signals", async () => {
     const scene = new ImageFixtureProvider("scene", async (query) => ({
       provider: "scene",
       status: "ok",
@@ -85,6 +85,7 @@ describe("ImageResolver", () => {
     const result = await resolver.resolve({
       input: "https://example.test/frame.jpg?token=private",
       limit: 2,
+      providers: ["all"],
     });
 
     expect(result).toEqual({
@@ -109,7 +110,10 @@ describe("ImageResolver", () => {
     }));
     const resolver = new ImageResolver([failed, source]);
 
-    const result = await resolver.resolve({ input: "https://example.test/frame.png" });
+    const result = await resolver.resolve({
+      input: "https://example.test/frame.png",
+      providers: ["failed", "source"],
+    });
 
     expect(result.matches).toEqual([{ ...imageMatch("source", 1), matchType: "source" }]);
     expect(result.providerRuns).toEqual([
@@ -134,6 +138,7 @@ describe("ImageResolver", () => {
 
     const result = await resolver.resolve({
       input: "https://example.test/frame.jpg?signature=private",
+      providers: ["failed"],
     });
 
     expect(result.providerRuns[0]?.message).toBe(
@@ -142,23 +147,60 @@ describe("ImageResolver", () => {
     expect(JSON.stringify(result)).not.toContain("private");
   });
 
-  it("times out a stalled provider and reports explicit text-only providers as unsupported", async () => {
+  it("rejects explicit text-only providers before invoking compatible providers", async () => {
+    let calls = 0;
+    const scene = new ImageFixtureProvider("scene", async () => {
+      calls += 1;
+      return { provider: "scene", status: "empty", items: [] };
+    });
+    const resolver = new ImageResolver([scene, new TextFixtureProvider()]);
+
+    await expect(
+      resolver.resolve({
+        input: "https://example.test/frame.png",
+        providers: ["scene", "text-only"],
+      }),
+    ).rejects.toMatchObject({
+      code: "unsupported_provider_capability",
+      details: {
+        operation: "resolve.image",
+        providers: ["text-only"],
+        compatibleProviders: ["scene"],
+      },
+    });
+    expect(calls).toBe(0);
+  });
+
+  it("requires an explicit provider selection", async () => {
+    const resolver = new ImageResolver([]);
+
+    await expect(
+      resolver.resolve({ input: "https://example.test/frame.png", providers: [] }),
+    ).rejects.toMatchObject({ code: "missing_provider_selection" });
+  });
+
+  it("still isolates runtime failures after provider validation", async () => {
     const stalled = new ImageFixtureProvider(
       "stalled",
       async () => await new Promise<ProviderRun<ImageMatch>>(() => undefined),
     );
-    const resolver = new ImageResolver([stalled, new TextFixtureProvider()], {
+    const source = new ImageFixtureProvider("source", async () => ({
+      provider: "source",
+      status: "empty",
+      items: [],
+    }));
+    const resolver = new ImageResolver([stalled, source], {
       providerTimeoutMs: 5,
     });
 
     const result = await resolver.resolve({
       input: "https://example.test/frame.png",
-      providers: ["stalled", "text-only"],
+      providers: ["stalled", "source"],
     });
 
     expect(result.providerRuns).toEqual([
       expect.objectContaining({ provider: "stalled", status: "unavailable", itemCount: 0 }),
-      expect.objectContaining({ provider: "text-only", status: "unsupported", itemCount: 0 }),
+      expect.objectContaining({ provider: "source", status: "empty", itemCount: 0 }),
     ]);
   });
 

@@ -10,6 +10,10 @@ export { parseImageInput, publicImageEvidence } from "./image-input.js";
 export { ImageResolver } from "./image-resolver.js";
 export { ProviderHost, ProviderRegistryService } from "./provider-host.js";
 export { ProviderManager, validateProviderPackageManifest } from "./provider-management.js";
+export {
+  ProviderSelectionError,
+  selectProvidersForOperation,
+} from "./provider-selection.js";
 export { Resolver, normalizeName } from "./resolver.js";
 export {
   BangumiArchiveProvider,
@@ -37,4 +41,9 @@ export type {
   ProviderModuleLoader,
   ProviderPackageManifest,
 } from "./provider-management.js";
+export type {
+  ProviderOperation,
+  ProviderSelectionErrorCode,
+  ProviderSelectionErrorDetails,
+} from "./provider-selection.js";
 export type * from "./types.js";

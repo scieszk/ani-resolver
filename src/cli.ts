@@ -7,6 +7,7 @@ import { Command, CommanderError, InvalidArgumentError } from "commander";
 
 import { ImageResolver } from "./image-resolver.js";
 import { parseContentInput } from "./input.js";
+import { ProviderSelectionError } from "./provider-selection.js";
 import { ProviderManager } from "./provider-management.js";
 import { Resolver } from "./resolver.js";
 import type { EntityType, ExternalId, Provider, ResolveResult } from "./types.js";
@@ -34,7 +35,7 @@ export function createCli(options: CliOptions = {}): Command {
 
   program
     .name("ani-resolver")
-    .description("Resolve anime works and characters into ranked, sourced identities")
+    .description("Provider-based anime metadata resolution infrastructure")
     .version("0.1.0")
     .configureOutput({
       writeOut: (value) => stdout.write(value),
@@ -53,48 +54,61 @@ export function createCli(options: CliOptions = {}): Command {
       writeJson(stdout, commandOptions.fullFiles ? evidence : compactEvidence(evidence));
     });
 
-  const resolve = program.command("resolve").description("Return ranked identity candidates");
-  for (const entityType of ["work", "character"] as const) {
-    resolve
-      .command(entityType)
-      .argument("<input>")
-      .option("--top <number>", "Maximum candidates", parsePositiveInteger, 5)
-      .option("--providers <ids>", "Comma-separated provider IDs", parseList)
-      .option("--work <external-id>", "Known work ID for character resolution", parseExternalId)
-      .option("--json", "Emit JSON")
-      .option("--full-files", "Include every parsed file path")
-      .action(
-        async (
-          input: string,
-          commandOptions: {
-            top: number;
-            providers?: string[];
-            work?: ExternalId;
-            fullFiles?: boolean;
-          },
-        ) => {
-          const resolver = await loadResolver();
-          const providers = validateProviderSelection(commandOptions.providers);
-          const result = await resolver.resolve({
-            entityType,
-            input,
-            limit: commandOptions.top,
-            ...(providers ? { providers } : {}),
-            ...(commandOptions.work ? { work: commandOptions.work } : {}),
-          });
-          writeJson(
-            stdout,
-            commandOptions.fullFiles ? result : compactResolveResult(result),
-          );
-        },
-      );
-  }
+  const resolve = program.command("resolve").description("Return ranked metadata candidates");
+  type ResolveCommandOptions = {
+    top: number;
+    providers?: string[];
+    work?: ExternalId;
+    fullFiles?: boolean;
+  };
+  const runResolve = async (
+    entityType: EntityType,
+    input: string,
+    commandOptions: ResolveCommandOptions,
+  ) => {
+    const resolver = await loadResolver();
+    const result = await resolver.resolve({
+      entityType,
+      input,
+      limit: commandOptions.top,
+      providers: commandOptions.providers ?? [],
+      ...(commandOptions.work ? { work: commandOptions.work } : {}),
+    });
+    writeJson(stdout, commandOptions.fullFiles ? result : compactResolveResult(result));
+  };
+  resolve
+    .command("work")
+    .description("Resolve an anime work from text, release, path, torrent, or magnet evidence")
+    .argument("<input>")
+    .option("--top <number>", "Maximum candidates", parsePositiveInteger, 5)
+    .option("--providers <ids>", "Comma-separated provider IDs or all (required)", parseList)
+    .option("--json", "Emit JSON")
+    .option("--full-files", "Include every parsed file path")
+    .action((input: string, commandOptions: ResolveCommandOptions) =>
+      runResolve("work", input, commandOptions),
+    );
+  resolve
+    .command("character")
+    .description("Resolve an anime character from a name or descriptive clues")
+    .argument("<input>")
+    .option("--top <number>", "Maximum candidates", parsePositiveInteger, 5)
+    .option("--providers <ids>", "Comma-separated provider IDs or all (required)", parseList)
+    .option("--work <external-id>", "Known work ID used as a character constraint", parseExternalId)
+    .option("--json", "Emit JSON")
+    .option("--full-files", "Include every parsed file path")
+    .action((input: string, commandOptions: ResolveCommandOptions) =>
+      runResolve("character", input, commandOptions),
+    );
   resolve
     .command("image")
     .description("Identify an anime scene, image source, or character from an image")
     .argument("<input>", "Local JPEG/PNG path or HTTP(S) image URL")
     .option("--top <number>", "Maximum matches per provider", parsePositiveInteger, 5)
-    .option("--providers <ids>", "Comma-separated provider IDs", parseList)
+    .option(
+      "--providers <ids>",
+      "IDs or all; selected providers receive image data (required)",
+      parseList,
+    )
     .option("--json", "Emit JSON")
     .action(
       async (
@@ -102,13 +116,12 @@ export function createCli(options: CliOptions = {}): Command {
         commandOptions: { top: number; providers?: string[] },
       ) => {
         const imageResolver = await loadImageResolver();
-        const providers = validateProviderSelection(commandOptions.providers);
         writeJson(
           stdout,
           await imageResolver.resolve({
             input,
             limit: commandOptions.top,
-            ...(providers ? { providers } : {}),
+            providers: commandOptions.providers ?? [],
           }),
         );
       },
@@ -118,6 +131,7 @@ export function createCli(options: CliOptions = {}): Command {
   addProviderList(providerCommand, stdout, options.providers, providerManager);
   providerCommand
     .command("install")
+    .description("Install a trusted local provider package")
     .argument("<provider-or-path>")
     .option("--trust-local", "Allow executing provider code from a local directory")
     .option("--json", "Emit JSON")
@@ -131,6 +145,7 @@ export function createCli(options: CliOptions = {}): Command {
     });
   providerCommand
     .command("init")
+    .description("Configure provider credentials or local data")
     .argument("<provider>")
     .option("--archive <path>", "Bangumi Archive dump ZIP")
     .option("--token <token>", "Provider access token")
@@ -202,8 +217,14 @@ export async function runCli(argv = process.argv, options: CliOptions = {}): Pro
     writeJson(stderr, {
       schemaVersion: "ani-resolver.error.v1",
       error: {
-        code: error instanceof CommanderError ? error.code : "runtime_error",
+        code:
+          error instanceof ProviderSelectionError
+            ? error.code
+            : error instanceof CommanderError
+              ? error.code
+              : "runtime_error",
         message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof ProviderSelectionError ? { details: error.details } : {}),
       },
     });
     return error instanceof CommanderError ? error.exitCode : 1;
@@ -224,11 +245,6 @@ function parsePositiveInteger(value: string): number {
 
 function parseList(value: string): string[] {
   return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
-}
-
-function validateProviderSelection(providers: string[] | undefined): string[] | undefined {
-  if (providers?.length === 0) throw new Error("provider list must not be empty");
-  return providers;
 }
 
 function parseEntityType(value: string): EntityType {
@@ -258,6 +274,7 @@ function addProviderList(
 ): void {
   command
     .command("list")
+    .description("List provider capabilities, status, authentication, and limitations")
     .option("--json", "Emit JSON")
     .action(async () => {
       writeJson(stdout, {

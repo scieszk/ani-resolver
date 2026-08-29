@@ -49,6 +49,14 @@ class CommandBuilderTests(unittest.TestCase):
                 providers="bangumi;touch-/tmp/x",
             )
 
+    def test_text_builder_rejects_empty_providers(self):
+        with self.assertRaisesRegex(ValueError, "provider"):
+            self.runner.build_resolve_args(
+                "work",
+                "迷宫饭",
+                providers="",
+            )
+
     def test_character_work_id_is_validated(self):
         args = self.runner.build_resolve_args(
             "character",
@@ -232,6 +240,19 @@ class PluginContractTests(unittest.TestCase):
         )
         providers_index = [arg.arg for arg in tool.args.args].index("providers")
         self.assertLess(providers_index, first_default_index)
+
+    def test_text_resolve_tools_require_provider_selection(self):
+        tree = ast.parse(MAIN_PATH.read_text(encoding="utf-8"))
+        for tool_name in ("resolve_work", "resolve_character"):
+            tool = next(
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.AsyncFunctionDef) and node.name == tool_name
+            )
+            providers_index = [arg.arg for arg in tool.args.args].index("providers")
+            first_default_index = len(tool.args.args) - len(tool.args.defaults)
+            self.assertLess(providers_index, first_default_index)
+            self.assertNotIn("留空使用全部", ast.get_docstring(tool) or "")
 
     def test_skill_routes_to_native_astrbot_tools(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")

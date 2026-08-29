@@ -64,15 +64,15 @@ class AniResolverPlugin(Star):
         self,
         event: AstrMessageEvent,
         input: str,
+        providers: str,
         top: int = 5,
-        providers: str = "",
     ) -> str:
         """将动画标题、发布名、路径、种子或磁力链接解析为多个作品候选及跨源 ID。
 
         Args:
             input(string): 要识别的内容
             top(number): 返回候选数量，1 到 20，默认 5
-            providers(string): 逗号分隔的数据源 ID；留空使用全部已就绪数据源
+            providers(string): 必选的逗号分隔数据源 ID，或显式传入 all；应先调用数据源列表选择
         """
         return await self._build_and_invoke(
             build_resolve_args,
@@ -87,9 +87,9 @@ class AniResolverPlugin(Star):
         self,
         event: AstrMessageEvent,
         input: str,
+        providers: str,
         work: str = "",
         top: int = 5,
-        providers: str = "",
     ) -> str:
         """根据角色名或外形特征返回多个角色候选；已知作品时应传入作品 ID 缩小范围。
 
@@ -97,7 +97,7 @@ class AniResolverPlugin(Star):
             input(string): 角色名或角色文字特征
             work(string): 可选作品 ID，例如 bangumi:400602、anilist:154587
             top(number): 返回候选数量，1 到 20，默认 5
-            providers(string): 逗号分隔的数据源 ID；留空使用全部已就绪数据源
+            providers(string): 必选的逗号分隔数据源 ID，或显式传入 all；应先调用数据源列表选择
         """
         return await self._build_and_invoke(
             build_resolve_args,

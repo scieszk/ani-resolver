@@ -169,6 +169,29 @@ async function runWithProviders(args: string[], providers: Provider[]) {
 }
 
 describe("CLI", () => {
+  it("documents explicit provider selection in command-specific help", () => {
+    const cli = createCli({ providers: [new CliProvider(), new ImageCliProvider()] });
+    const resolve = cli.commands.find((command) => command.name() === "resolve")!;
+    const work = resolve.commands.find((command) => command.name() === "work")!;
+    const character = resolve.commands.find((command) => command.name() === "character")!;
+    const image = resolve.commands.find((command) => command.name() === "image")!;
+    const provider = cli.commands.find((command) => command.name() === "provider")!;
+    const providerList = provider.commands.find((command) => command.name() === "list")!;
+    const providerInstall = provider.commands.find((command) => command.name() === "install")!;
+    const providerInit = provider.commands.find((command) => command.name() === "init")!;
+
+    expect(cli.description()).toContain("metadata resolution infrastructure");
+    expect(work.description()).toContain("work");
+    expect(work.helpInformation()).toContain("--providers <ids>");
+    expect(work.helpInformation()).toContain("required");
+    expect(work.helpInformation()).not.toContain("--work <external-id>");
+    expect(character.helpInformation()).toContain("--work <external-id>");
+    expect(image.helpInformation()).toMatch(/selected providers receive\s+image data/);
+    expect(providerList.description()).toContain("capabilities");
+    expect(providerInstall.description()).toContain("provider package");
+    expect(providerInit.description()).toContain("credentials");
+  });
+
   it("preserves a TMDB media kind in external ID syntax", () => {
     expect(parseExternalId("tmdb-tv:209867")).toEqual({
       source: "tmdb",
@@ -287,7 +310,60 @@ describe("CLI", () => {
 
     expect(exitCode).toBe(1);
     expect(stdout.value).toBe("");
-    expect(stderr.value).toContain("provider list must not be empty");
+    expect(JSON.parse(stderr.value)).toMatchObject({
+      schemaVersion: "ani-resolver.error.v1",
+      error: { code: "missing_provider_selection" },
+    });
+  });
+
+  it("rejects a missing provider selection with a stable error code", async () => {
+    const stdout = new MemoryStream();
+    const stderr = new MemoryStream();
+
+    const exitCode = await runCli(
+      ["node", "ani-resolver", "resolve", "work", "Example"],
+      { providers: [new CliProvider()], stdout, stderr },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout.value).toBe("");
+    expect(JSON.parse(stderr.value)).toMatchObject({
+      schemaVersion: "ani-resolver.error.v1",
+      error: { code: "missing_provider_selection" },
+    });
+  });
+
+  it("rejects providers that do not support the selected operation", async () => {
+    const stdout = new MemoryStream();
+    const stderr = new MemoryStream();
+
+    const exitCode = await runCli(
+      [
+        "node",
+        "ani-resolver",
+        "resolve",
+        "image",
+        "https://example.test/frame.jpg",
+        "--providers",
+        "fixture",
+      ],
+      { providers: [new CliProvider(), new ImageCliProvider()], stdout, stderr },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout.value).toBe("");
+    expect(JSON.parse(stderr.value)).toMatchObject({
+      schemaVersion: "ani-resolver.error.v1",
+      error: {
+        code: "unsupported_provider_capability",
+        message: expect.stringContaining("does not support image lookup"),
+        details: {
+          operation: "resolve.image",
+          providers: ["fixture"],
+          compatibleProviders: ["image-fixture"],
+        },
+      },
+    });
   });
 
   it("gets entity details and lists work characters", async () => {
@@ -312,7 +388,7 @@ describe("CLI", () => {
     });
   });
 
-  it("emits structured JSON and a nonzero code for runtime errors", async () => {
+  it("emits structured JSON and a nonzero code for unknown providers", async () => {
     const stdout = new MemoryStream();
     const stderr = new MemoryStream();
 
@@ -325,7 +401,7 @@ describe("CLI", () => {
     expect(stdout.value).toBe("");
     expect(JSON.parse(stderr.value)).toMatchObject({
       schemaVersion: "ani-resolver.error.v1",
-      error: { code: "runtime_error", message: "Unknown provider: missing" },
+      error: { code: "unknown_provider", message: expect.stringContaining("Unknown provider: missing") },
     });
   });
 });

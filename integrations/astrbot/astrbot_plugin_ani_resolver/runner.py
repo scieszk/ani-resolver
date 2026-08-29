@@ -27,16 +27,17 @@ def build_resolve_args(
     entity_type: str,
     value: str,
     *,
+    providers: str,
     top: int = 5,
-    providers: str = "",
     work: str = "",
 ) -> list[str]:
     if entity_type not in {"work", "character"}:
         raise ValueError("entity type must be work or character")
     args = ["resolve", entity_type, _input(value), "--top", str(_top(top))]
     normalized_providers = _providers(providers)
-    if normalized_providers:
-        args.extend(["--providers", normalized_providers])
+    if not normalized_providers:
+        raise ValueError("provider list must not be empty")
+    args.extend(["--providers", normalized_providers])
     if work:
         if entity_type != "character":
             raise ValueError("work constraint is only valid for character resolution")

@@ -34,6 +34,93 @@ class FakeProvider implements Provider {
 describe("Resolver", () => {
   afterEach(() => vi.useRealTimers());
 
+  it("requires an explicit provider selection", async () => {
+    const resolver = new Resolver([]);
+
+    await expect(
+      resolver.resolve({ entityType: "work", input: "Example", providers: [] }),
+    ).rejects.toMatchObject({ code: "missing_provider_selection" });
+  });
+
+  it("expands all to providers compatible with the requested operation", async () => {
+    const works = new FakeProvider(manifest("works"), {
+      provider: "works",
+      status: "empty",
+      items: [],
+    });
+    const imageOnly: Provider = {
+      manifest: {
+        ...manifest("images"),
+        capabilities: ["anime_scene_lookup"],
+      },
+      async searchImage() {
+        throw new Error("image provider must not run for work resolution");
+      },
+    };
+
+    const result = await new Resolver([works, imageOnly]).resolve({
+      entityType: "work",
+      input: "Example",
+      providers: ["all"],
+    });
+
+    expect(result.providerRuns).toEqual([
+      expect.objectContaining({ provider: "works", status: "empty" }),
+    ]);
+  });
+
+  it("rejects an incompatible explicit provider before invoking valid providers", async () => {
+    const run = vi.fn(async () => ({
+      provider: "characters",
+      status: "empty" as const,
+      items: [],
+    }));
+    const characters: Provider = {
+      manifest: { ...manifest("characters"), capabilities: ["character_search"] },
+      searchCharacters: run,
+    };
+    const works = new FakeProvider(manifest("works"), {
+      provider: "works",
+      status: "empty",
+      items: [],
+    });
+
+    await expect(
+      new Resolver([characters, works]).resolve({
+        entityType: "character",
+        input: "Example",
+        providers: ["characters", "works"],
+      }),
+    ).rejects.toMatchObject({
+      code: "unsupported_provider_capability",
+      details: {
+        operation: "resolve.character",
+        providers: ["works"],
+        compatibleProviders: ["characters"],
+      },
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("rejects all combined with named providers", async () => {
+    const works = new FakeProvider(manifest("works"), {
+      provider: "works",
+      status: "empty",
+      items: [],
+    });
+
+    await expect(
+      new Resolver([works]).resolve({
+        entityType: "work",
+        input: "Example",
+        providers: ["all", "works"],
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_provider_selection",
+      details: { providers: ["all", "works"] },
+    });
+  });
+
   it("fuses matching work candidates and preserves TMDB and Bangumi IDs", async () => {
     const bangumi = new FakeProvider(manifest("bangumi"), {
       provider: "bangumi",
@@ -76,6 +163,7 @@ describe("Resolver", () => {
       entityType: "work",
       input: "葬送的芙莉莲 (2023)",
       limit: 5,
+      providers: ["all"],
     });
 
     expect(result.candidates).toHaveLength(1);
@@ -138,6 +226,7 @@ describe("Resolver", () => {
     const result = await new Resolver([left, right]).resolve({
       entityType: "work",
       input: "Example",
+      providers: ["all"],
     });
 
     expect(result.candidates[0]?.facts.appearance).toEqual({
@@ -190,6 +279,7 @@ describe("Resolver", () => {
     const result = await new Resolver([online, archive]).resolve({
       entityType: "work",
       input: "Dungeon Meshi",
+      providers: ["all"],
     });
 
     expect(result.candidates).toHaveLength(1);
@@ -229,6 +319,7 @@ describe("Resolver", () => {
       entityType: "work",
       input: "Example",
       limit: 5,
+      providers: ["all"],
     });
 
     expect(result.candidates).toHaveLength(1);
@@ -273,6 +364,7 @@ describe("Resolver", () => {
       entityType: "character",
       input: "Isla",
       limit: 3,
+      providers: ["all"],
     });
 
     expect(result.candidates[0]).toMatchObject({
@@ -319,15 +411,22 @@ describe("Resolver", () => {
     const result = await new Resolver([provider]).resolve({
       entityType: "work",
       input: "Example",
+      providers: ["all"],
     });
 
     expect(result.candidates).toHaveLength(2);
   });
 
   it("returns duplicate-source explicit IDs as separate possibilities", async () => {
-    const result = await new Resolver([]).resolve({
+    const provider = new FakeProvider(manifest("tmdb"), {
+      provider: "tmdb",
+      status: "empty",
+      items: [],
+    });
+    const result = await new Resolver([provider]).resolve({
       entityType: "work",
       input: "Example [tmdbid=101] [tmdbid=202]",
+      providers: ["tmdb"],
     });
 
     expect(result.candidates).toHaveLength(2);
@@ -338,9 +437,16 @@ describe("Resolver", () => {
   });
 
   it("does not reinterpret work tags as exact character IDs", async () => {
-    const result = await new Resolver([]).resolve({
+    const provider: Provider = {
+      manifest: { ...manifest("characters"), capabilities: ["character_search"] },
+      async searchCharacters() {
+        return { provider: "characters", status: "empty", items: [] };
+      },
+    };
+    const result = await new Resolver([provider]).resolve({
       entityType: "character",
       input: "Example [tmdbid=101]/Season 1/Example S01E01.mkv",
+      providers: ["characters"],
     });
 
     expect(result.candidates).toEqual([]);
@@ -357,6 +463,7 @@ describe("Resolver", () => {
     const resolution = new Resolver([stalled], { providerTimeoutMs: 10 }).resolve({
       entityType: "work",
       input: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Example",
+      providers: ["stalled"],
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -371,10 +478,17 @@ describe("Resolver", () => {
 
   it("preserves a character work constraint in the public query", async () => {
     const work = { source: "tmdb", id: "101", mediaKind: "tv" } as const;
-    const result = await new Resolver([]).resolve({
+    const provider: Provider = {
+      manifest: { ...manifest("characters"), capabilities: ["character_search"] },
+      async searchCharacters() {
+        return { provider: "characters", status: "empty", items: [] };
+      },
+    };
+    const result = await new Resolver([provider]).resolve({
       entityType: "character",
       input: "white hair",
       work,
+      providers: ["characters"],
     });
 
     expect(result.query).toMatchObject({ work });
@@ -403,6 +517,7 @@ describe("Resolver", () => {
     const result = await new Resolver([provider]).resolve({
       entityType: "character",
       input: "Example [bgmid=400602]/Season 1/Example S01E01.mkv",
+      providers: ["bangumi"],
     });
 
     expect(observedWork).toEqual({ source: "bangumi", id: "400602" });

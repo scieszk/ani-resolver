@@ -1,4 +1,5 @@
 import { parseContentInput } from "./input.js";
+import { selectProvidersForOperation } from "./provider-selection.js";
 import type {
   CharacterAppearance,
   Conflict,
@@ -28,6 +29,11 @@ export class Resolver {
   }
 
   async resolve(request: ResolveRequest): Promise<ResolveResult> {
+    const selected = selectProvidersForOperation(
+      this.providers.values(),
+      request.providers,
+      `resolve.${request.entityType}`,
+    );
     const parsed = await parseContentInput(request.input);
     const limit = Math.max(1, Math.min(request.limit ?? 5, 50));
     const query = toResolveQuery(parsed, request, limit);
@@ -47,7 +53,6 @@ export class Resolver {
       };
     }
 
-    const selected = this.selectProviders(request.providers);
     const providerRuns = await Promise.all(
       selected.map((provider) =>
         runProvider(
@@ -68,15 +73,6 @@ export class Resolver {
       candidates,
       providerRuns: providerRuns.map(summarizeProviderRun),
     };
-  }
-
-  private selectProviders(ids: string[] | undefined): Provider[] {
-    if (!ids?.length) return [...this.providers.values()];
-    const unknown = [...new Set(ids.filter((id) => !this.providers.has(id)))];
-    if (unknown.length > 0) {
-      throw new Error(`Unknown provider${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}`);
-    }
-    return ids.map((id) => this.providers.get(id)!);
   }
 }
 

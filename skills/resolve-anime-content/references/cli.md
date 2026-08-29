@@ -39,7 +39,7 @@ ani-resolver provider init bangumi-archive --archive <dump.zip> --json
 ani-resolver parse <text-or-path-or-magnet> --json
 ani-resolver resolve work <input> --top 5 --providers bangumi,tmdb --json
 ani-resolver resolve character <input> --top 5 --providers wikidata,anilist,bangumi --json
-ani-resolver resolve character <clue> --work bangumi:400602 --top 5 --json
+ani-resolver resolve character <clue> --work bangumi:400602 --providers bangumi --top 5 --json
 ani-resolver resolve character "white hair twintails" --providers wikidata --top 5 --json
 ani-resolver resolve image <frame.jpg> --providers trace-moe --top 5 --json
 ani-resolver resolve image <artwork-url> --providers saucenao --top 5 --json
@@ -58,6 +58,8 @@ Use `tmdb-tv:<id>` or `tmdb-movie:<id>` for details because TMDB has separate nu
 Bangumi API and Bangumi Archive share the `bangumi:<id>` namespace. Use `--provider bangumi-archive` on `entity get` or `work characters` when the local source is intended.
 
 `provider init --json` never opens an interactive prompt. Missing setup values return `status: needs_input`, `required`, and `acceptedOptions`. Bangumi Archive initialization streams the dump ZIP into a local SQLite FTS5 index; the ZIP is not used as a query-time database.
+
+Every resolve command requires `--providers`. Pass comma-separated provider IDs, or pass `all` by itself to query every loaded provider compatible with that operation. A missing selection, `all` mixed with IDs, an unknown provider, or a provider lacking the requested capability returns a structured error before upstream requests begin.
 
 ## Resolve Output
 
