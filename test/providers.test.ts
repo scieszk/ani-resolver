@@ -1,10 +1,56 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BangumiProvider } from "../src/providers/bangumi.js";
+import { createDefaultProviders } from "../src/providers/index.js";
 import { requestJson } from "../src/providers/http.js";
 import { TmdbProvider } from "../src/providers/tmdb.js";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+describe("default providers", () => {
+  it("includes every bundled remote image capability", () => {
+    expect(createDefaultProviders().map((provider) => provider.manifest.id)).toEqual(
+      expect.arrayContaining(["trace-moe", "saucenao", "animetrace"]),
+    );
+  });
+
+  it("passes image provider credentials from the environment into requests", async () => {
+    vi.stubEnv("SAUCENAO_API_KEY", "sauce-from-env");
+    vi.stubEnv("TRACE_MOE_API_KEY", "trace-from-env");
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      if (String(input).includes("saucenao.com")) {
+        return new Response(JSON.stringify({ header: { status: 0 }, results: [] }));
+      }
+      return new Response(JSON.stringify({ frameCount: 0, error: "", result: [] }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const providers = createDefaultProviders();
+    const imageQuery = {
+      input: {
+        kind: "url" as const,
+        source: "https://example.test/frame.jpg",
+        display: "https://example.test/frame.jpg",
+      },
+      limit: 1,
+    };
+
+    await providers.find((provider) => provider.manifest.id === "saucenao")?.searchImage?.(
+      imageQuery,
+    );
+    await providers.find((provider) => provider.manifest.id === "trace-moe")?.searchImage?.(
+      imageQuery,
+    );
+
+    const sauceCall = fetcher.mock.calls.find(([input]) => String(input).includes("saucenao.com"));
+    const traceCall = fetcher.mock.calls.find(([input]) => String(input).includes("trace.moe"));
+    expect((sauceCall?.[1]?.body as FormData).get("api_key")).toBe("sauce-from-env");
+    expect(new Headers(traceCall?.[1]?.headers).get("x-trace-key")).toBe("trace-from-env");
+  });
+});
 
 describe("requestJson", () => {
   it("aborts a stalled fetch at the HTTP boundary", async () => {

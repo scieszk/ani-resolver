@@ -1,6 +1,6 @@
 # ani-resolver
 
-`ani-resolver` turns anime titles, release names, paths, torrent files, magnets, and character clues into ranked identity candidates with source evidence. It returns data; it does not download, rename, move, or delete files.
+`ani-resolver` turns anime titles, release names, paths, torrent files, magnets, character clues, and images into ranked identity or source candidates with evidence. It returns data; it does not download, rename, move, or delete files.
 
 The project has two deliberately separate layers:
 
@@ -12,6 +12,7 @@ The project has two deliberately separate layers:
 - Node.js 24 or newer
 - A descriptive project User-Agent for Bangumi, supplied by the built-in provider
 - `TMDB_ACCESS_TOKEN`, `TMDB_API_KEY`, or a credential stored by `provider init tmdb` for TMDB requests
+- `SAUCENAO_API_KEY` or a credential stored by `provider init saucenao` for SauceNAO requests
 
 When the network requires a proxy, start Node with `NODE_USE_ENV_PROXY=1` and set `HTTPS_PROXY` to the user's proxy URL. A provider connection failure does not mean the title has no matches.
 
@@ -30,11 +31,16 @@ ani-resolver provider list --json
 ani-resolver provider init bangumi-archive --archive /path/to/dump.zip --json
 ani-resolver provider init tmdb --token "$TMDB_ACCESS_TOKEN" --json
 ani-resolver provider init tmdb --api-key "$TMDB_API_KEY" --json
+ani-resolver provider init saucenao --api-key "$SAUCENAO_API_KEY" --json
+ani-resolver provider init trace-moe --api-key "$TRACE_MOE_API_KEY" --json
 ani-resolver parse "[VCB-Studio] Sousou no Frieren [01][1080p].mkv" --json
 ani-resolver resolve work "葬送的芙莉莲 (2023)" --top 5 --json
 ani-resolver resolve character "艾拉" --providers bangumi --top 5 --json
 ani-resolver resolve character "女主 白发 双马尾 前期没什么表情" --providers wikidata,anilist,bangumi --top 5 --json
 ani-resolver resolve character "白发 双马尾" --work anilist:154587 --top 5 --json
+ani-resolver resolve image ./frame.jpg --providers trace-moe --top 5 --json
+ani-resolver resolve image https://example.com/artwork.jpg --providers saucenao --top 5 --json
+ani-resolver resolve image ./character.png --providers animetrace --top 5 --json
 ani-resolver entity get work bangumi:400602 --json
 ani-resolver entity get character wikidata:Q104144455 --json
 ani-resolver entity get work tmdb-tv:209867 --json
@@ -49,15 +55,20 @@ Torrent and directory evidence reports `fileCount` plus up to eight representati
 
 Magnet parsing uses the full input in memory, but emitted evidence removes tracker and web-seed parameters that may contain private passkeys. Provider calls time out after 15 seconds by default so one stalled source cannot block the complete result.
 
+Image resolution emits `ani-resolver.image.v1`. It keeps scene, source, and character matches distinct and preserves upstream `similarity`, its declared `similarityScale`, result order, and low-confidence flags rather than manufacturing one cross-provider probability. AnimeTrace candidates are ranked within each detected person box, not globally across people. Local inputs accept JPEG and PNG files up to 20 MiB. Image providers receive the selected file or URL, so callers should disclose the third-party upload and select only the providers needed for the request.
+
 ## Providers
 
-| Provider | Work search | Work detail | Character search | Appearance search | Work characters | Authentication |
-| --- | --- | --- | --- | --- | --- | --- |
-| Bangumi API | yes | yes | yes | text-derived | yes | optional |
-| TMDB | yes | yes | no | no | no | required |
-| AniList | yes | yes | yes | text-derived | yes | none |
-| Wikidata | no | no | yes | structured | yes | none |
-| Bangumi Archive | yes | yes | yes | text-derived | yes | none |
+| Provider | Work search | Character search | Image lookup | Work characters | Authentication |
+| --- | --- | --- | --- | --- | --- |
+| Bangumi API | yes | yes | no | yes | optional |
+| TMDB | yes | no | no | no | required |
+| AniList | yes | yes | no | yes | none |
+| Wikidata | no | yes | no | yes | none |
+| Bangumi Archive | yes | yes | no | yes | none |
+| trace.moe | no | no | anime scene, episode, timestamp | no | optional |
+| SauceNAO | no | no | original source and creator | no | required |
+| AnimeTrace | no | no | anime/Galgame character | no | none |
 
 Run `ani-resolver provider list --json` for machine-readable capabilities, lifecycle status, strengths, limitations, languages, attribution, and authentication requirements. Provider code can be bundled while provider data still reports `needs_init`.
 
@@ -146,12 +157,15 @@ Tests use recorded fixtures and injected `fetch`; normal test runs do not call l
 - [TMDB API](https://developer.themoviedb.org/)
 - [AniList GraphQL API](https://docs.anilist.co/)
 - [Wikidata](https://www.wikidata.org/)
+- [trace.moe API](https://github.com/soruly/trace.moe-api)
+- [SauceNAO](https://saucenao.com/)
+- [AnimeTrace API](https://www.animetrace.com/api-docs/)
 
 Provider data remains subject to its upstream terms and attribution requirements. This repository does not redistribute upstream datasets or images.
 
 ## AstrBot Integration
 
-The bundled AstrBot plugin exposes six constrained LLM tools for provider inspection, parsing, work and character resolution, entity lookup, and work-character listing. It also bundles an AstrBot-native `resolve-anime-content` skill that orchestrates those tools without depending on Codex or HAPI.
+The bundled AstrBot plugin exposes seven constrained LLM tools for provider inspection, parsing, work, character, and image resolution, entity lookup, and work-character listing. It also bundles an AstrBot-native `resolve-anime-content` skill that orchestrates those tools without depending on Codex or HAPI.
 
 The plugin lives at `integrations/astrbot/astrbot_plugin_ani_resolver`. Mount the installed ani-resolver directory into the AstrBot container at the same path, read-only, then copy the plugin into AstrBot's persistent `data/plugins` directory:
 

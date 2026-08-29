@@ -6,7 +6,10 @@ export async function requestJson(
   input: string | URL,
   init?: RequestInit,
   timeoutMs = 15_000,
-): Promise<{ ok: true; data: unknown } | { ok: false; run: ProviderRun }> {
+): Promise<
+  | { ok: true; data: unknown; httpStatus: number }
+  | { ok: false; run: ProviderRun; httpStatus?: number; data?: unknown }
+> {
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(new Error(`Timed out after ${timeoutMs}ms`)),
@@ -27,16 +30,22 @@ export async function requestJson(
       const status = responseStatus(response.status);
       try {
         const detail = await response.text();
-        return failure(provider, status, detail || `HTTP ${response.status}`);
+        return failure(
+          provider,
+          status,
+          detail || `HTTP ${response.status}`,
+          response.status,
+          parseJson(detail),
+        );
       } catch (error) {
         return signal.aborted
           ? failure(provider, "unavailable", formatError(error))
-          : failure(provider, status, `HTTP ${response.status}`);
+          : failure(provider, status, `HTTP ${response.status}`, response.status);
       }
     }
 
     try {
-      return { ok: true, data: await response.json() };
+      return { ok: true, data: await response.json(), httpStatus: response.status };
     } catch (error) {
       return failure(
         provider,
@@ -60,7 +69,7 @@ function formatError(error: unknown): string {
 
 function responseStatus(status: number): ProviderStatus {
   if (status === 401 || status === 403) return "auth_required";
-  if (status === 429) return "rate_limited";
+  if (status === 402 || status === 429) return "rate_limited";
   if (status >= 500) return "unavailable";
   return "invalid_response";
 }
@@ -69,6 +78,22 @@ function failure(
   provider: string,
   status: ProviderStatus,
   message: string,
-): { ok: false; run: ProviderRun } {
-  return { ok: false, run: { provider, status, items: [], message } };
+  httpStatus?: number,
+  data?: unknown,
+): { ok: false; run: ProviderRun; httpStatus?: number; data?: unknown } {
+  return {
+    ok: false,
+    run: { provider, status, items: [], message },
+    ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(data === undefined ? {} : { data }),
+  };
+}
+
+function parseJson(value: string): unknown {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
 }

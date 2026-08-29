@@ -11,7 +11,9 @@ from .runner import (
     build_parse_args,
     build_provider_list_args,
     build_resolve_args,
+    build_resolve_image_args,
     build_work_characters_args,
+    resolve_event_image_input,
 )
 
 
@@ -19,7 +21,7 @@ from .runner import (
     "astrbot_plugin_ani_resolver",
     "scieszk",
     "为 AstrBot 提供动画作品、角色和外部 ID 的多源识别工具",
-    "0.2.0",
+    "0.3.0",
 )
 class AniResolverPlugin(Star):
     def __init__(self, context: Context):
@@ -104,6 +106,33 @@ class AniResolverPlugin(Star):
             top=top,
             providers=providers,
             work=work,
+        )
+
+    @filter.llm_tool(name="ani_resolver_resolve_image")
+    async def resolve_image(
+        self,
+        event: AstrMessageEvent,
+        providers: str,
+        input: str = "",
+        top: int = 5,
+    ) -> str:
+        """从图片识别动画场景、原图出处或动漫角色，并保留各数据源自己的排名信号。
+
+        Args:
+            providers(string): 必选的逗号分隔数据源 ID，例如 trace-moe、saucenao、animetrace
+            input(string): 可选 HTTP(S) 图片 URL；留空读取当前或被回复消息中的图片
+            top(number): 每个数据源返回的候选数量，1 到 20，默认 5
+        """
+        explicit_input = input.strip()
+        resolved_input = explicit_input or await resolve_event_image_input(event)
+        if not resolved_input:
+            return '{"schemaVersion":"ani-resolver.astrbot-error.v1","error":{"code":"image_unavailable","message":"No image was found in the tool input, current message, or replied message"}}'
+        return await self._build_and_invoke(
+            build_resolve_image_args,
+            resolved_input,
+            top=top,
+            providers=providers,
+            allow_local=not explicit_input,
         )
 
     @filter.llm_tool(name="ani_resolver_entity_get")

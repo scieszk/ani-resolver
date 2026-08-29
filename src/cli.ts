@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 
+import { ImageResolver } from "./image-resolver.js";
 import { parseContentInput } from "./input.js";
 import { ProviderManager } from "./provider-management.js";
 import { Resolver } from "./resolver.js";
@@ -28,6 +29,7 @@ export function createCli(options: CliOptions = {}): Command {
     return (await hostPromise).providers();
   };
   const loadResolver = async () => new Resolver(await loadProviders());
+  const loadImageResolver = async () => new ImageResolver(await loadProviders());
   const program = new Command();
 
   program
@@ -72,11 +74,12 @@ export function createCli(options: CliOptions = {}): Command {
           },
         ) => {
           const resolver = await loadResolver();
+          const providers = validateProviderSelection(commandOptions.providers);
           const result = await resolver.resolve({
             entityType,
             input,
             limit: commandOptions.top,
-            ...(commandOptions.providers ? { providers: commandOptions.providers } : {}),
+            ...(providers ? { providers } : {}),
             ...(commandOptions.work ? { work: commandOptions.work } : {}),
           });
           writeJson(
@@ -86,6 +89,30 @@ export function createCli(options: CliOptions = {}): Command {
         },
       );
   }
+  resolve
+    .command("image")
+    .description("Identify an anime scene, image source, or character from an image")
+    .argument("<input>", "Local JPEG/PNG path or HTTP(S) image URL")
+    .option("--top <number>", "Maximum matches per provider", parsePositiveInteger, 5)
+    .option("--providers <ids>", "Comma-separated provider IDs", parseList)
+    .option("--json", "Emit JSON")
+    .action(
+      async (
+        input: string,
+        commandOptions: { top: number; providers?: string[] },
+      ) => {
+        const imageResolver = await loadImageResolver();
+        const providers = validateProviderSelection(commandOptions.providers);
+        writeJson(
+          stdout,
+          await imageResolver.resolve({
+            input,
+            limit: commandOptions.top,
+            ...(providers ? { providers } : {}),
+          }),
+        );
+      },
+    );
 
   const providerCommand = program.command("provider").description("Manage provider capabilities and data");
   addProviderList(providerCommand, stdout, options.providers, providerManager);
@@ -197,6 +224,11 @@ function parsePositiveInteger(value: string): number {
 
 function parseList(value: string): string[] {
   return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
+}
+
+function validateProviderSelection(providers: string[] | undefined): string[] | undefined {
+  if (providers?.length === 0) throw new Error("provider list must not be empty");
+  return providers;
 }
 
 function parseEntityType(value: string): EntityType {

@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import importlib.util
 from pathlib import Path
 import sys
@@ -10,6 +11,7 @@ RUNNER_PATH = PLUGIN_ROOT / "runner.py"
 MAIN_PATH = PLUGIN_ROOT / "main.py"
 SKILL_PATH = PLUGIN_ROOT / "skills" / "resolve-anime-content" / "SKILL.md"
 METADATA_PATH = PLUGIN_ROOT / "metadata.yaml"
+ROOT_SKILL_PATH = Path(__file__).parents[3] / "skills" / "resolve-anime-content" / "SKILL.md"
 
 
 def load_runner_module():
@@ -86,6 +88,76 @@ class CommandBuilderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "top"):
             self.runner.build_resolve_args("work", "迷宫饭", top=51, providers="")
 
+    def test_image_input_stays_one_argv_value(self):
+        args = self.runner.build_resolve_image_args(
+            'https://example.test/frame.jpg?name="quoted"',
+            top=3,
+            providers="trace-moe,animetrace,saucenao",
+        )
+
+        self.assertEqual(
+            args[:3],
+            ["resolve", "image", 'https://example.test/frame.jpg?name="quoted"'],
+        )
+        self.assertEqual(args[-1], "--json")
+
+    def test_image_builder_rejects_explicit_local_paths_and_empty_providers(self):
+        with self.assertRaisesRegex(ValueError, "HTTP"):
+            self.runner.build_resolve_image_args(
+                "/AstrBot/data/private/avatar.jpg",
+                providers="trace-moe",
+            )
+
+        attachment_args = self.runner.build_resolve_image_args(
+            "/AstrBot/data/temp/message-image.jpg",
+            providers="animetrace",
+            allow_local=True,
+        )
+        self.assertEqual(
+            attachment_args[:3],
+            ["resolve", "image", "/AstrBot/data/temp/message-image.jpg"],
+        )
+
+        with self.assertRaisesRegex(ValueError, "provider"):
+            self.runner.build_resolve_image_args(
+                "https://example.test/frame.jpg",
+                providers=",",
+            )
+
+    def test_image_input_can_be_taken_from_a_replied_or_current_message(self):
+        class Image:
+            def __init__(self, *, url="", file=""):
+                self.url = url
+                self.file = file
+
+        class Reply:
+            def __init__(self, chain):
+                self.chain = chain
+
+        class Event:
+            def __init__(self, chain):
+                self.chain = chain
+
+            def get_messages(self):
+                return self.chain
+
+        replied = Image(url="https://example.test/replied.jpg")
+        current = Image(url="https://example.test/current.jpg")
+
+        self.assertEqual(
+            asyncio.run(
+                self.runner.resolve_event_image_input(Event([Reply([replied]), current]))
+            ),
+            "https://example.test/replied.jpg",
+        )
+        self.assertEqual(
+            asyncio.run(self.runner.resolve_event_image_input(Event([current]))),
+            "https://example.test/current.jpg",
+        )
+        self.assertIsNone(
+            asyncio.run(self.runner.resolve_event_image_input(Event([]))),
+        )
+
 
 class PluginContractTests(unittest.TestCase):
     def test_plugin_metadata_matches_registered_version(self):
@@ -137,10 +209,29 @@ class PluginContractTests(unittest.TestCase):
                 "parse_content",
                 "resolve_work",
                 "resolve_character",
+                "resolve_image",
                 "entity_get",
                 "work_characters",
             },
         )
+
+    def test_image_tool_allows_the_message_attachment_to_supply_input(self):
+        tree = ast.parse(MAIN_PATH.read_text(encoding="utf-8"))
+        tool = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "resolve_image"
+        )
+        input_index = [arg.arg for arg in tool.args.args].index("input")
+        first_default_index = len(tool.args.args) - len(tool.args.defaults)
+
+        self.assertGreaterEqual(input_index, first_default_index)
+        self.assertEqual(
+            ast.literal_eval(tool.args.defaults[input_index - first_default_index]),
+            "",
+        )
+        providers_index = [arg.arg for arg in tool.args.args].index("providers")
+        self.assertLess(providers_index, first_default_index)
 
     def test_skill_routes_to_native_astrbot_tools(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
@@ -149,6 +240,7 @@ class PluginContractTests(unittest.TestCase):
             "ani_resolver_parse",
             "ani_resolver_resolve_work",
             "ani_resolver_resolve_character",
+            "ani_resolver_resolve_image",
             "ani_resolver_entity_get",
             "ani_resolver_work_characters",
         ):
@@ -159,6 +251,25 @@ class PluginContractTests(unittest.TestCase):
             "Wikidata",
             "facts.appearance",
             "anilist:<id>",
+            "anime_scene_lookup",
+            "reverse_image_lookup",
+            "character_image_lookup",
+        ):
+            self.assertIn(guidance, skill)
+
+    def test_bundled_skill_routes_image_intents_and_preserves_native_confidence(self):
+        skill = ROOT_SKILL_PATH.read_text(encoding="utf-8")
+
+        for guidance in (
+            "resolve image",
+            "trace.moe",
+            "SauceNAO",
+            "AnimeTrace",
+            "anime_scene_lookup",
+            "reverse_image_lookup",
+            "character_image_lookup",
+            "notConfident",
+            "third-party",
         ):
             self.assertIn(guidance, skill)
 

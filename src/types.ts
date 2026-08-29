@@ -9,7 +9,10 @@ export type ProviderCapability =
   | "character_detail"
   | "work_characters"
   | "id_mapping"
-  | "episodes";
+  | "episodes"
+  | "anime_scene_lookup"
+  | "reverse_image_lookup"
+  | "character_image_lookup";
 export type ProviderStatus =
   | "ok"
   | "empty"
@@ -113,8 +116,65 @@ export interface Provider {
   readonly manifest: ProviderManifest;
   searchWorks?(query: ResolveQuery): Promise<ProviderRun<ProviderCandidate>>;
   searchCharacters?(query: ResolveQuery): Promise<ProviderRun<ProviderCandidate>>;
+  searchImage?(query: ImageQuery): Promise<ProviderRun<ImageMatch>>;
   getEntity?(id: ExternalId, entityType: EntityType): Promise<ProviderRun<ProviderCandidate>>;
   listWorkCharacters?(work: ExternalId): Promise<ProviderRun<ProviderCandidate>>;
+}
+
+export type ImageMatchType = "anime_scene" | "source" | "character";
+export type ImageSimilarityScale = "unit_interval" | "percent";
+
+export interface ImageMatchEvidence {
+  provider: string;
+  kind: string;
+  value: unknown;
+}
+
+export interface ProviderImageInput {
+  kind: "file" | "url";
+  source: string;
+  display: string;
+  fileName?: string;
+  mimeType?: "image/jpeg" | "image/png";
+  size?: number;
+}
+
+export interface ImageEvidence {
+  kind: ProviderImageInput["kind"];
+  display: string;
+  mimeType?: ProviderImageInput["mimeType"];
+  size?: number;
+}
+
+export interface ImageQuery {
+  input: ProviderImageInput;
+  limit: number;
+}
+
+export interface ImageMatch {
+  provider: string;
+  providerId: string;
+  matchType: ImageMatchType;
+  rank: number;
+  similarity?: number;
+  similarityScale?: ImageSimilarityScale;
+  names: string[];
+  externalIds: ExternalId[];
+  facts: Record<string, unknown>;
+  evidence: ImageMatchEvidence[];
+}
+
+export interface ImageResolveRequest {
+  input: string;
+  limit?: number;
+  providers?: string[];
+}
+
+export interface ImageResolveResult {
+  schemaVersion: "ani-resolver.image.v1";
+  query: ImageEvidence;
+  matches: ImageMatch[];
+  providerRuns: ProviderRunSummary[];
 }
 
 export interface ContentEvidence {

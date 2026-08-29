@@ -8,12 +8,15 @@ import { z } from "zod";
 import { KeyringCredentialStore, type CredentialStore } from "./credentials.js";
 import { ProviderHost, type ProviderPlugin } from "./provider-host.js";
 import { AniListProvider } from "./providers/anilist.js";
+import { AnimeTraceProvider } from "./providers/animetrace.js";
 import {
   BangumiArchiveProvider,
   bangumiArchiveManifest,
 } from "./providers/bangumi-archive.js";
 import { BangumiProvider } from "./providers/bangumi.js";
+import { SauceNaoProvider } from "./providers/saucenao.js";
 import { TmdbProvider } from "./providers/tmdb.js";
+import { TraceMoeProvider } from "./providers/trace-moe.js";
 import { WikidataProvider } from "./providers/wikidata.js";
 import type { ProviderManifest } from "./types.js";
 
@@ -81,6 +84,9 @@ export class ProviderManager {
     new TmdbProvider().manifest,
     new AniListProvider().manifest,
     new WikidataProvider().manifest,
+    new TraceMoeProvider().manifest,
+    new SauceNaoProvider().manifest,
+    new AnimeTraceProvider().manifest,
     bangumiArchiveManifest,
   ];
 
@@ -228,6 +234,34 @@ export class ProviderManager {
       }
     }
 
+    if (provider === "saucenao") {
+      const apiKey =
+        options.apiKey ??
+        process.env.SAUCENAO_API_KEY ??
+        (await this.credentials.get("saucenao", "api-key"));
+      if (!apiKey) {
+        return {
+          provider,
+          status: "needs_input",
+          required: ["api_key"],
+          acceptedOptions: ["--api-key <api-key>", "SAUCENAO_API_KEY"],
+        };
+      }
+      if (options.apiKey || process.env.SAUCENAO_API_KEY) {
+        await this.credentials.set("saucenao", "api-key", apiKey);
+      }
+    }
+
+    if (provider === "trace-moe") {
+      const apiKey =
+        options.apiKey ??
+        process.env.TRACE_MOE_API_KEY ??
+        (await this.credentials.get("trace-moe", "api-key"));
+      if (apiKey && (options.apiKey || process.env.TRACE_MOE_API_KEY)) {
+        await this.credentials.set("trace-moe", "api-key", apiKey);
+      }
+    }
+
     await this.writeState(provider, { initialized: true });
     return { provider, status: "ready" };
   }
@@ -263,6 +297,22 @@ export class ProviderManager {
           apiKey = undefined;
         }
       }
+      let sauceNaoApiKey = process.env.SAUCENAO_API_KEY;
+      if (!sauceNaoApiKey) {
+        try {
+          sauceNaoApiKey = await this.credentials.get("saucenao", "api-key");
+        } catch {
+          sauceNaoApiKey = undefined;
+        }
+      }
+      let traceMoeApiKey = process.env.TRACE_MOE_API_KEY;
+      if (!traceMoeApiKey) {
+        try {
+          traceMoeApiKey = await this.credentials.get("trace-moe", "api-key");
+        } catch {
+          traceMoeApiKey = undefined;
+        }
+      }
       const archiveIndex = await this.archiveIndexPath();
       await host.use((context) => {
         context.providers.add(new BangumiProvider());
@@ -274,6 +324,13 @@ export class ProviderManager {
         );
         context.providers.add(new AniListProvider());
         context.providers.add(new WikidataProvider());
+        context.providers.add(
+          new TraceMoeProvider({ ...(traceMoeApiKey ? { apiKey: traceMoeApiKey } : {}) }),
+        );
+        context.providers.add(
+          new SauceNaoProvider({ ...(sauceNaoApiKey ? { apiKey: sauceNaoApiKey } : {}) }),
+        );
+        context.providers.add(new AnimeTraceProvider());
         if (archiveIndex) {
           context.providers.add(new BangumiArchiveProvider({ indexPath: archiveIndex }));
         }
@@ -349,12 +406,15 @@ export class ProviderManager {
 
   private isInitialized(provider: string, state: ProviderState | undefined): boolean {
     const manifest = this.bundled.find((item) => item.id === provider);
-    if (manifest?.auth === "none" && provider !== "bangumi-archive") return true;
-    if (provider === "bangumi") return true;
+    if (provider === "bangumi-archive") return Boolean(state?.initialized && state.indexPath);
     if (provider === "tmdb") {
       return Boolean(state?.initialized || process.env.TMDB_ACCESS_TOKEN || process.env.TMDB_API_KEY);
     }
-    return Boolean(state?.initialized && state.indexPath);
+    if (provider === "saucenao") {
+      return Boolean(state?.initialized || process.env.SAUCENAO_API_KEY);
+    }
+    if (manifest?.auth === "none" || manifest?.auth === "optional") return true;
+    return Boolean(state?.initialized);
   }
 
   private async writeState(provider: string, state: ProviderState): Promise<void> {

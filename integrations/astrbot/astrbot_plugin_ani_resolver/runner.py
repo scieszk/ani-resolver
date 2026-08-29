@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import os
 import re
@@ -42,6 +43,72 @@ def build_resolve_args(
         args.extend(["--work", _external_id(work)])
     args.append("--json")
     return args
+
+
+def build_resolve_image_args(
+    value: str,
+    *,
+    providers: str,
+    top: int = 5,
+    allow_local: bool = False,
+) -> list[str]:
+    args = [
+        "resolve",
+        "image",
+        _image_input(value, allow_local=allow_local),
+        "--top",
+        str(_top(top)),
+    ]
+    normalized_providers = _providers(providers)
+    if not normalized_providers:
+        raise ValueError("image provider list must not be empty")
+    args.extend(["--providers", normalized_providers])
+    args.append("--json")
+    return args
+
+
+async def resolve_event_image_input(event) -> str | None:
+    chain = list(event.get_messages() or [])
+    reply_images = []
+    current_images = []
+    for segment in chain:
+        if segment.__class__.__name__ == "Reply":
+            reply_images.extend(getattr(segment, "chain", None) or [])
+        elif segment.__class__.__name__ == "Image":
+            current_images.append(segment)
+
+    for segment in [*reply_images, *current_images]:
+        value = await _image_component_input(segment)
+        if value:
+            return value
+    return None
+
+
+async def _image_component_input(segment) -> str | None:
+    if segment.__class__.__name__ != "Image":
+        return None
+    for attribute in ("file", "path"):
+        value = getattr(segment, attribute, "")
+        if isinstance(value, str) and value and os.path.isfile(value):
+            return value
+
+    converter = getattr(segment, "convert_to_file_path", None)
+    if callable(converter):
+        try:
+            converted = converter()
+            if inspect.isawaitable(converted):
+                converted = await converted
+            if isinstance(converted, str) and converted:
+                if os.path.isfile(converted) or converted.startswith(("http://", "https://")):
+                    return converted
+        except Exception:
+            pass
+
+    for attribute in ("url", "file"):
+        value = getattr(segment, attribute, "")
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    return None
 
 
 def build_entity_get_args(entity_type: str, external_id: str, provider: str = "") -> list[str]:
@@ -105,6 +172,13 @@ def _input(value: str) -> str:
     if len(normalized) > MAX_INPUT_LENGTH:
         raise ValueError(f"input must not exceed {MAX_INPUT_LENGTH} characters")
     return normalized
+
+
+def _image_input(value: str, *, allow_local: bool) -> str:
+    normalized = _input(value)
+    if allow_local or normalized.lower().startswith(("http://", "https://")):
+        return normalized
+    raise ValueError("explicit image input must be an HTTP(S) URL")
 
 
 def _top(value: int) -> int:

@@ -7,6 +7,8 @@ import { compactQueryFiles, createCli, parseExternalId, runCli } from "../src/cl
 import { ProviderManager } from "../src/provider-management.js";
 import type {
   ExternalId,
+  ImageMatch,
+  ImageQuery,
   Provider,
   ProviderCandidate,
   ProviderManifest,
@@ -20,6 +22,37 @@ class MemoryStream extends Writable {
   _write(chunk: Buffer | string, _encoding: BufferEncoding, callback: () => void) {
     this.value += chunk.toString();
     callback();
+  }
+}
+
+class ImageCliProvider implements Provider {
+  readonly manifest: ProviderManifest = {
+    id: "image-fixture",
+    label: "Image Fixture",
+    mediaTypes: ["anime"],
+    capabilities: ["anime_scene_lookup"],
+    languages: ["en"],
+    auth: "none",
+    strengths: ["tests"],
+    limitations: [],
+  };
+
+  async searchImage(query: ImageQuery): Promise<ProviderRun<ImageMatch>> {
+    return {
+      provider: this.manifest.id,
+      status: "ok",
+      items: Array.from({ length: query.limit }, (_, index) => ({
+        provider: this.manifest.id,
+        providerId: String(index + 1),
+        matchType: "anime_scene" as const,
+        rank: index + 1,
+        similarity: 0.9 - index * 0.01,
+        names: [`Scene ${index + 1}`],
+        externalIds: [{ source: "anilist", id: String(100 + index) }],
+        facts: {},
+        evidence: [],
+      })),
+    };
   }
 }
 
@@ -211,6 +244,50 @@ describe("CLI", () => {
 
     expect(output.schemaVersion).toBe("ani-resolver.resolve.v1");
     expect(output.candidates[0]).toMatchObject({ entityType: "work", names: ["Fixture Work"] });
+  });
+
+  it("resolves an image path or URL through selected image providers", async () => {
+    const result = await runWithProviders(
+      [
+        "resolve",
+        "image",
+        "https://example.test/frame.jpg?signature=private",
+        "--providers",
+        "image-fixture",
+        "--top",
+        "2",
+        "--json",
+      ],
+      [new CliProvider(), new ImageCliProvider()],
+    );
+    const output = JSON.parse(result.stdout);
+
+    expect(output).toMatchObject({
+      schemaVersion: "ani-resolver.image.v1",
+      query: { kind: "url", display: "https://example.test/frame.jpg" },
+      matches: [
+        expect.objectContaining({ provider: "image-fixture", rank: 1 }),
+        expect.objectContaining({ provider: "image-fixture", rank: 2 }),
+      ],
+      providerRuns: [
+        expect.objectContaining({ provider: "image-fixture", status: "ok", itemCount: 2 }),
+      ],
+    });
+    expect(result.stdout).not.toContain("private");
+  });
+
+  it("rejects a syntactically present but empty provider list", async () => {
+    const stdout = new MemoryStream();
+    const stderr = new MemoryStream();
+
+    const exitCode = await runCli(
+      ["node", "ani-resolver", "resolve", "image", "https://example.test/frame.jpg", "--providers", ","],
+      { providers: [new ImageCliProvider()], stdout, stderr },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout.value).toBe("");
+    expect(stderr.value).toContain("provider list must not be empty");
   });
 
   it("gets entity details and lists work characters", async () => {

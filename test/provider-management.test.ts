@@ -56,6 +56,21 @@ describe("ProviderManager", () => {
           status: "ready",
         }),
         expect.objectContaining({
+          id: "trace-moe",
+          initialized: true,
+          status: "ready",
+        }),
+        expect.objectContaining({
+          id: "animetrace",
+          initialized: true,
+          status: "ready",
+        }),
+        expect.objectContaining({
+          id: "saucenao",
+          initialized: false,
+          status: "needs_init",
+        }),
+        expect.objectContaining({
           id: "bangumi-archive",
           installed: true,
           initialized: false,
@@ -127,6 +142,51 @@ describe("ProviderManager", () => {
     await expect(credentials.get("tmdb", "api-key")).resolves.toBe("secret-api-key");
   });
 
+  it("requires and stores a SauceNAO API key through provider init", async () => {
+    const values = new Map<string, string>();
+    const credentials = {
+      get: async (provider: string, name: string) => values.get(`${provider}:${name}`),
+      set: async (provider: string, name: string, value: string) => {
+        values.set(`${provider}:${name}`, value);
+      },
+    };
+    const manager = new ProviderManager({ home: await temporaryHome(), credentials });
+
+    await expect(manager.init("saucenao", {})).resolves.toMatchObject({
+      provider: "saucenao",
+      status: "needs_input",
+      required: ["api_key"],
+    });
+    await expect(manager.init("saucenao", { apiKey: "sauce-secret" })).resolves.toMatchObject({
+      provider: "saucenao",
+      status: "ready",
+    });
+    await expect(credentials.get("saucenao", "api-key")).resolves.toBe("sauce-secret");
+    await expect(manager.list()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "saucenao", initialized: true, status: "ready" }),
+      ]),
+    );
+  });
+
+  it("stores an optional trace.moe API key without requiring one", async () => {
+    const values = new Map<string, string>();
+    const credentials = {
+      get: async (provider: string, name: string) => values.get(`${provider}:${name}`),
+      set: async (provider: string, name: string, value: string) => {
+        values.set(`${provider}:${name}`, value);
+      },
+    };
+    const manager = new ProviderManager({ home: await temporaryHome(), credentials });
+
+    await expect(manager.init("trace-moe", {})).resolves.toMatchObject({ status: "ready" });
+    await expect(manager.init("trace-moe", { apiKey: "trace-secret" })).resolves.toMatchObject({
+      provider: "trace-moe",
+      status: "ready",
+    });
+    await expect(credentials.get("trace-moe", "api-key")).resolves.toBe("trace-secret");
+  });
+
   it("loads ready bundled providers through the Cordis host", async () => {
     const manager = new ProviderManager({ home: await temporaryHome() });
 
@@ -137,6 +197,9 @@ describe("ProviderManager", () => {
       "tmdb",
       "anilist",
       "wikidata",
+      "trace-moe",
+      "saucenao",
+      "animetrace",
     ]);
     await host.dispose();
   });

@@ -6,6 +6,8 @@ export {
   scoreAppearanceMatch,
 } from "./appearance.js";
 export { KeyringCredentialStore } from "./credentials.js";
+export { parseImageInput, publicImageEvidence } from "./image-input.js";
+export { ImageResolver } from "./image-resolver.js";
 export { ProviderHost, ProviderRegistryService } from "./provider-host.js";
 export { ProviderManager, validateProviderPackageManifest } from "./provider-management.js";
 export { Resolver, normalizeName } from "./resolver.js";
@@ -15,9 +17,12 @@ export {
   buildBangumiArchiveIndex,
 } from "./providers/bangumi-archive.js";
 export {
+  AnimeTraceProvider,
   BangumiProvider,
   AniListProvider,
+  SauceNaoProvider,
   TmdbProvider,
+  TraceMoeProvider,
   WikidataProvider,
   createDefaultProviders,
 } from "./providers/index.js";
