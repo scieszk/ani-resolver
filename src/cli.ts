@@ -17,6 +17,14 @@ export interface CliOptions {
   providerManager?: ProviderManager;
   stdout?: NodeJS.WritableStream;
   stderr?: NodeJS.WritableStream;
+  startWebServer?: (options: WebCliOptions) => Promise<void>;
+}
+
+export interface WebCliOptions {
+  host: string;
+  port: number;
+  maxStorageMb: number;
+  stdout: NodeJS.WritableStream;
 }
 
 export function createCli(options: CliOptions = {}): Command {
@@ -194,6 +202,30 @@ export function createCli(options: CliOptions = {}): Command {
       writeJson(stdout, await provider.listWorkCharacters(id));
     });
 
+  program
+    .command("web")
+    .description("Run the local browser UI and history API")
+    .option("--host <host>", "Listen address", "0.0.0.0")
+    .option("--port <port>", "Listen port", parsePort, 4173)
+    .option("--max-storage-mb <number>", "Attachment storage quota in MiB", parseStorageMb, 100)
+    .action(
+      async (commandOptions: { host: string; port: number; maxStorageMb: number }) => {
+        const start =
+          options.startWebServer ??
+          (async (webOptions: WebCliOptions) => {
+            const { startWebServer } = await import("./web/start.js");
+            const handle = await startWebServer(webOptions);
+            webOptions.stdout.write(`ani-resolver web listening on ${handle.url}\n`);
+            const shutdown = async () => {
+              await handle.close();
+            };
+            process.once("SIGINT", shutdown);
+            process.once("SIGTERM", shutdown);
+          });
+        await start({ ...commandOptions, stdout });
+      },
+    );
+
   program.hook("postAction", async () => {
     if (hostPromise) await (await hostPromise).dispose();
   });
@@ -239,6 +271,22 @@ function parsePositiveInteger(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) {
     throw new InvalidArgumentError("must be an integer between 1 and 50");
+  }
+  return parsed;
+}
+
+function parsePort(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+    throw new InvalidArgumentError("must be an integer between 1 and 65535");
+  }
+  return parsed;
+}
+
+function parseStorageMb(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10_240) {
+    throw new InvalidArgumentError("must be an integer between 1 and 10240");
   }
   return parsed;
 }

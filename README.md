@@ -44,6 +44,25 @@ ani-resolver entity get work tmdb-tv:209867 --json
 ani-resolver work characters bangumi:400602 --provider bangumi-archive --json
 ```
 
+## Local Web Console
+
+The same package includes a React browser UI and HTTP API for running queries, inspecting typed results, viewing provider traces, and searching run history:
+
+```bash
+npm run build
+ani-resolver web --host 0.0.0.0 --port 4173 --max-storage-mb 100
+```
+
+Open `http://<machine-ip>:4173/` from another device on the LAN. The web console has no browser access token or login layer; bind it only to a trusted network. Provider credentials stay in the server process and are never returned by the API.
+
+Each run records its text input, selected providers, inferred or explicit target, ranked result, provider status, and timing. JPEG, PNG, and torrent attachments are copied into managed storage. Deleting a run removes its stored files, and automatic cleanup purges the oldest attachment bodies when the configurable quota is exceeded while retaining the run metadata. The defaults are 500 runs and 100 MiB of stored attachments.
+
+For local-only access, bind to loopback instead:
+
+```bash
+ani-resolver web --host 127.0.0.1 --port 4173
+```
+
 `tmdb-tv:<id>` and `tmdb-movie:<id>` preserve TMDB's separate TV and movie namespaces. Existing path tags such as `[tmdbid=262929]` and `{tmdb-262929}` are recognized, with media kind inferred when the path contains useful TV or movie evidence.
 
 Successful commands emit JSON on stdout. Errors emit `ani-resolver.error.v1` JSON on stderr and use a nonzero exit code. `resolve` keeps multiple candidates unless unambiguous explicit work IDs identify one candidate; duplicate IDs from the same source remain separate possibilities. Scores are deterministic match scores, not statistical probabilities.

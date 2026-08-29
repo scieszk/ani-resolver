@@ -1,0 +1,25 @@
+[Unit]
+Description=ani-resolver local web console
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ops
+Group=ops
+WorkingDirectory=/srv/ani-resolver/app
+Environment=ANI_RESOLVER_WEB_DATA=/srv/ani-resolver/web
+ExecStart=/srv/ani-resolver/bin/ani-resolver web --host 0.0.0.0 --port 4173 --max-storage-mb 100
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/ani-resolver/data /srv/ani-resolver/web
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

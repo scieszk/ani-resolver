@@ -1,7 +1,7 @@
 import { Writable } from "node:stream";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { compactQueryFiles, createCli, parseExternalId, runCli } from "../src/cli.js";
 import { ProviderManager } from "../src/provider-management.js";
@@ -168,6 +168,11 @@ async function runWithProviders(args: string[], providers: Provider[]) {
   return { stdout: stdout.value, stderr: stderr.value };
 }
 
+function webOptionNames(cli: ReturnType<typeof createCli>): string[] {
+  const web = cli.commands.find((command) => command.name() === "web")!;
+  return web.options.map((option) => option.attributeName());
+}
+
 describe("CLI", () => {
   it("documents explicit provider selection in command-specific help", () => {
     const cli = createCli({ providers: [new CliProvider(), new ImageCliProvider()] });
@@ -179,6 +184,7 @@ describe("CLI", () => {
     const providerList = provider.commands.find((command) => command.name() === "list")!;
     const providerInstall = provider.commands.find((command) => command.name() === "install")!;
     const providerInit = provider.commands.find((command) => command.name() === "init")!;
+    const web = cli.commands.find((command) => command.name() === "web")!;
 
     expect(cli.description()).toContain("metadata resolution infrastructure");
     expect(work.description()).toContain("work");
@@ -190,6 +196,27 @@ describe("CLI", () => {
     expect(providerList.description()).toContain("capabilities");
     expect(providerInstall.description()).toContain("provider package");
     expect(providerInit.description()).toContain("credentials");
+    expect(web.description()).toContain("browser");
+    expect(web.helpInformation()).toContain("--host <host>");
+    expect(web.helpInformation()).toContain("0.0.0.0");
+  });
+
+  it("starts the browser UI with LAN-safe options and no access token", async () => {
+    const startWebServer = vi.fn(async () => undefined);
+    const cli = createCli({ providers: [new CliProvider()], startWebServer });
+
+    await cli.parseAsync(
+      ["web", "--host", "0.0.0.0", "--port", "4517", "--max-storage-mb", "64"],
+      { from: "user" },
+    );
+
+    expect(startWebServer).toHaveBeenCalledWith({
+      host: "0.0.0.0",
+      port: 4517,
+      maxStorageMb: 64,
+      stdout: process.stdout,
+    });
+    expect(webOptionNames(cli)).not.toContain("token");
   });
 
   it("preserves a TMDB media kind in external ID syntax", () => {
