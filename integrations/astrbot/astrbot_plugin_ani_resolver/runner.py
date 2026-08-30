@@ -24,6 +24,14 @@ def build_parse_args(value: str) -> list[str]:
     return ["parse", _input(value), "--json"]
 
 
+def build_inventory_args(value: str, *, full_files: bool = False) -> list[str]:
+    args = ["inventory", _input(value)]
+    if full_files:
+        args.append("--full-files")
+    args.append("--json")
+    return args
+
+
 def build_resolve_args(
     entity_type: str,
     value: str,
@@ -134,6 +142,45 @@ async def resolve_event_image_input(event) -> str | None:
     return None
 
 
+async def resolve_event_torrent_input(event) -> str | None:
+    chain = list(event.get_messages() or [])
+    reply_files = []
+    current_files = []
+    for segment in chain:
+        if segment.__class__.__name__ == "Reply":
+            reply_files.extend(getattr(segment, "chain", None) or [])
+        elif segment.__class__.__name__ == "File":
+            current_files.append(segment)
+
+    for segment in [*reply_files, *current_files]:
+        value = await _torrent_component_input(segment)
+        if value:
+            return value
+    return None
+
+
+async def _torrent_component_input(segment) -> str | None:
+    if segment.__class__.__name__ != "File":
+        return None
+    name = getattr(segment, "name", "") or ""
+    if name and not name.lower().endswith(".torrent"):
+        return None
+    getter = getattr(segment, "get_file", None)
+    if not callable(getter):
+        return None
+    try:
+        value = getter()
+        if inspect.isawaitable(value):
+            value = await value
+    except Exception:
+        return None
+    if not isinstance(value, str) or not value or not os.path.isfile(value):
+        return None
+    if not (name.lower().endswith(".torrent") or value.lower().endswith(".torrent")):
+        return None
+    return value
+
+
 async def _image_component_input(segment) -> str | None:
     if segment.__class__.__name__ != "Image":
         return None
@@ -169,6 +216,29 @@ def build_entity_get_args(entity_type: str, external_id: str, provider: str = ""
         args.extend(["--provider", _provider(provider)])
     args.append("--json")
     return args
+
+
+def build_entity_relations_args(
+    entity_type: str,
+    external_ids: str,
+    *,
+    providers: str,
+) -> list[str]:
+    if entity_type not in {"work", "character"}:
+        raise ValueError("entity type must be work or character")
+    ids = _external_ids(external_ids)
+    normalized_providers = _providers(providers)
+    if not normalized_providers:
+        raise ValueError("provider list must not be empty")
+    return [
+        "entity",
+        "relations",
+        entity_type,
+        *ids,
+        "--providers",
+        normalized_providers,
+        "--json",
+    ]
 
 
 def build_work_characters_args(external_id: str, provider: str = "") -> list[str]:
@@ -274,6 +344,13 @@ def _external_id(value: str) -> str:
     if not EXTERNAL_ID.fullmatch(normalized):
         raise ValueError(f"invalid external ID: {normalized}")
     return normalized
+
+
+def _external_ids(value: str) -> list[str]:
+    values = [item.strip() for item in value.split(",") if item.strip()]
+    if not values or len(values) > 20:
+        raise ValueError("external ID list must contain between 1 and 20 IDs")
+    return list(dict.fromkeys(_external_id(item) for item in values))
 
 
 def _error(code: str, message: str) -> str:

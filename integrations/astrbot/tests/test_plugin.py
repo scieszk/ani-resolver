@@ -3,6 +3,7 @@ import asyncio
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 
@@ -39,6 +40,20 @@ class CommandBuilderTests(unittest.TestCase):
 
         self.assertEqual(args[:3], ["resolve", "work", '迷宫饭"; touch /tmp/should-not-exist'])
         self.assertEqual(args[-1], "--json")
+
+    def test_inventory_input_stays_one_argv_value_and_is_bounded_by_default(self):
+        args = self.runner.build_inventory_args(
+            "/media/Anime/Dungeon Meshi [01-24]",
+        )
+
+        self.assertEqual(
+            args,
+            ["inventory", "/media/Anime/Dungeon Meshi [01-24]", "--json"],
+        )
+        self.assertEqual(
+            self.runner.build_inventory_args("/media/Anime", full_files=True),
+            ["inventory", "/media/Anime", "--full-files", "--json"],
+        )
 
     def test_provider_ids_reject_shell_syntax(self):
         with self.assertRaisesRegex(ValueError, "provider"):
@@ -106,6 +121,33 @@ class CommandBuilderTests(unittest.TestCase):
             self.runner.build_entity_get_args(
                 "character",
                 "wikidata:Q1;touch-/tmp/x",
+            )
+
+    def test_entity_relations_builder_validates_multiple_ids_and_providers(self):
+        args = self.runner.build_entity_relations_args(
+            "work",
+            "bangumi:400602,anilist:154587",
+            providers="bangumi,anilist",
+        )
+
+        self.assertEqual(
+            args,
+            [
+                "entity",
+                "relations",
+                "work",
+                "bangumi:400602",
+                "anilist:154587",
+                "--providers",
+                "bangumi,anilist",
+                "--json",
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "external ID"):
+            self.runner.build_entity_relations_args(
+                "work",
+                "bangumi:400602;touch-/tmp/x",
+                providers="bangumi",
             )
 
     def test_top_is_bounded(self):
@@ -182,6 +224,57 @@ class CommandBuilderTests(unittest.TestCase):
             asyncio.run(self.runner.resolve_event_image_input(Event([]))),
         )
 
+    def test_torrent_input_can_be_taken_from_a_replied_or_current_file(self):
+        class File:
+            def __init__(self, name, file_path):
+                self.name = name
+                self.file_path = file_path
+                self.calls = 0
+
+            async def get_file(self):
+                self.calls += 1
+                return self.file_path
+
+        class Reply:
+            def __init__(self, chain):
+                self.chain = chain
+
+        class Event:
+            def __init__(self, chain):
+                self.chain = chain
+
+            def get_messages(self):
+                return self.chain
+
+        with tempfile.TemporaryDirectory() as temporary:
+            replied_path = Path(temporary) / "replied.torrent"
+            current_path = Path(temporary) / "current.torrent"
+            text_path = Path(temporary) / "notes.txt"
+            replied_path.write_bytes(b"torrent")
+            current_path.write_bytes(b"torrent")
+            text_path.write_text("notes", encoding="utf-8")
+
+            self.assertEqual(
+                asyncio.run(
+                    self.runner.resolve_event_torrent_input(
+                        Event([
+                            Reply([File("replied.torrent", str(replied_path))]),
+                            File("current.torrent", str(current_path)),
+                        ])
+                    )
+                ),
+                str(replied_path),
+            )
+            non_torrent = File("notes.txt", str(text_path))
+            self.assertIsNone(
+                asyncio.run(
+                    self.runner.resolve_event_torrent_input(
+                        Event([non_torrent])
+                    )
+                )
+            )
+            self.assertEqual(non_torrent.calls, 0)
+
 
 class PluginContractTests(unittest.TestCase):
     def test_plugin_metadata_matches_registered_version(self):
@@ -231,10 +324,12 @@ class PluginContractTests(unittest.TestCase):
             {
                 "provider_list",
                 "parse_content",
+                "inventory_content",
                 "resolve_work",
                 "resolve_character",
                 "resolve_image",
                 "entity_get",
+                "entity_relations",
                 "work_characters",
             },
         )
@@ -256,6 +351,23 @@ class PluginContractTests(unittest.TestCase):
         )
         providers_index = [arg.arg for arg in tool.args.args].index("providers")
         self.assertLess(providers_index, first_default_index)
+
+    def test_content_tools_allow_a_torrent_attachment_to_supply_input(self):
+        tree = ast.parse(MAIN_PATH.read_text(encoding="utf-8"))
+        for tool_name in ("parse_content", "inventory_content", "resolve_work"):
+            tool = next(
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.AsyncFunctionDef) and node.name == tool_name
+            )
+            input_index = [arg.arg for arg in tool.args.args].index("input")
+            first_default_index = len(tool.args.args) - len(tool.args.defaults)
+            self.assertGreaterEqual(input_index, first_default_index, tool_name)
+            self.assertEqual(
+                ast.literal_eval(tool.args.defaults[input_index - first_default_index]),
+                "",
+                tool_name,
+            )
 
     def test_text_resolve_tools_require_provider_selection(self):
         tree = ast.parse(MAIN_PATH.read_text(encoding="utf-8"))
@@ -298,10 +410,12 @@ class PluginContractTests(unittest.TestCase):
         for tool_name in (
             "ani_resolver_provider_list",
             "ani_resolver_parse",
+            "ani_resolver_inventory",
             "ani_resolver_resolve_work",
             "ani_resolver_resolve_character",
             "ani_resolver_resolve_image",
             "ani_resolver_entity_get",
+            "ani_resolver_entity_relations",
             "ani_resolver_work_characters",
         ):
             self.assertIn(tool_name, skill)
@@ -322,6 +436,10 @@ class PluginContractTests(unittest.TestCase):
 
         for guidance in (
             "resolve image",
+            "inventory",
+            "outcome",
+            "entity relations",
+            "source-to-destination",
             "trace.moe",
             "SauceNAO",
             "AnimeTrace",

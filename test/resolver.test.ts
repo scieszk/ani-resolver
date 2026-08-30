@@ -323,9 +323,38 @@ describe("Resolver", () => {
     });
 
     expect(result.candidates).toHaveLength(1);
+    expect(result.outcome).toBe("partial");
     expect(result.providerRuns).toContainEqual(
       expect.objectContaining({ provider: "failed", status: "unavailable" }),
     );
+  });
+
+  it("distinguishes no matches from providers that could not run", async () => {
+    const empty = new FakeProvider(manifest("empty"), {
+      provider: "empty",
+      status: "empty",
+      items: [],
+    });
+    const unavailable = new FakeProvider(manifest("unavailable"), {
+      provider: "unavailable",
+      status: "auth_required",
+      items: [],
+      message: "credentials are missing",
+    });
+
+    const noMatch = await new Resolver([empty]).resolve({
+      entityType: "work",
+      input: "Example",
+      providers: ["empty"],
+    });
+    const couldNotRun = await new Resolver([unavailable]).resolve({
+      entityType: "work",
+      input: "Example",
+      providers: ["unavailable"],
+    });
+
+    expect(noMatch.outcome).toBe("no_match");
+    expect(couldNotRun.outcome).toBe("unavailable");
   });
 
   it("resolves characters without inventing a work identity", async () => {

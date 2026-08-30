@@ -1,4 +1,5 @@
 import { ImageResolver } from "../image-resolver.js";
+import { externalIdsOverlap, mergeRelatedEntities } from "../entity-relations.js";
 import { ProviderManager, type ProviderListItem } from "../provider-management.js";
 import { Resolver } from "../resolver.js";
 import type {
@@ -99,7 +100,7 @@ export class DefaultResolutionService implements ResolutionService {
     const relations = completed.flatMap((run) => run.items);
 
     if (entityType === "character") {
-      const works = uniqueRelated(relations.filter((item) => item.entityType === "work")).slice(0, 2);
+      const works = mergeRelatedEntities(relations.filter((item) => item.entityType === "work")).slice(0, 2);
       const derived = await Promise.all(works.map(async (work) => {
         const provider = providers.find((candidate) => candidate.manifest.id === work.provider);
         return provider ? relationRun(provider, work.externalIds, "work", this.relationTimeoutMs) : null;
@@ -115,9 +116,9 @@ export class DefaultResolutionService implements ResolutionService {
       !relation.externalIds.some((id) => externalIds.some((favoriteId) => externalIdsOverlap(id, favoriteId))),
     );
     return {
-      works: uniqueRelated(withoutFavorite.filter((item) => item.entityType === "work")).slice(0, 24),
-      characters: uniqueRelated(withoutFavorite.filter((item) => item.entityType === "character")).slice(0, 24),
-      people: uniqueRelated(withoutFavorite.filter((item) => item.entityType === "person")).slice(0, 24),
+      works: mergeRelatedEntities(withoutFavorite.filter((item) => item.entityType === "work")).slice(0, 24),
+      characters: mergeRelatedEntities(withoutFavorite.filter((item) => item.entityType === "character")).slice(0, 24),
+      people: mergeRelatedEntities(withoutFavorite.filter((item) => item.entityType === "person")).slice(0, 24),
       providerRuns: completed.map(summarizeProviderRun),
       refreshedAt: new Date().toISOString(),
     };
@@ -197,68 +198,6 @@ function favoriteExternalIds(favorite: FavoriteRecord): ExternalId[] {
         : {}),
     }];
   });
-}
-
-function uniqueRelated(items: ProviderRelatedEntity[]): ProviderRelatedEntity[] {
-  const merged: ProviderRelatedEntity[] = [];
-  for (const item of items) {
-    const existingIndex = merged.findIndex((candidate) => relatedEntitiesOverlap(candidate, item));
-    if (existingIndex < 0) {
-      merged.push({ ...item, names: [...item.names], externalIds: [...item.externalIds], facts: { ...item.facts } });
-      continue;
-    }
-    merged[existingIndex] = mergeRelated(merged[existingIndex]!, item);
-  }
-  return merged;
-}
-
-function externalIdKey(id: ExternalId): string {
-  return `${id.source}:${id.id}:${id.mediaKind ?? ""}`;
-}
-
-function relatedEntitiesOverlap(left: ProviderRelatedEntity, right: ProviderRelatedEntity): boolean {
-  if (left.entityType !== right.entityType) return false;
-  if (left.externalIds.some((leftId) => right.externalIds.some((rightId) => externalIdsOverlap(leftId, rightId)))) {
-    return true;
-  }
-  return left.provider === right.provider && left.providerId === right.providerId;
-}
-
-function externalIdsOverlap(left: ExternalId, right: ExternalId): boolean {
-  if (left.source !== right.source || left.id !== right.id) return false;
-  const leftKind = left.mediaKind;
-  const rightKind = right.mediaKind;
-  return !leftKind || leftKind === "unknown" || !rightKind || rightKind === "unknown" || leftKind === rightKind;
-}
-
-function mergeRelated(left: ProviderRelatedEntity, right: ProviderRelatedEntity): ProviderRelatedEntity {
-  const externalIds = [...left.externalIds];
-  const externalIdKeys = new Set(externalIds.map(externalIdKey));
-  for (const id of right.externalIds) {
-    if (!externalIdKeys.has(externalIdKey(id))) externalIds.push(id);
-  }
-  const image = left.image ?? right.image;
-  const mediaKind = preferredMediaKind(left.mediaKind, right.mediaKind);
-  const year = left.year ?? right.year;
-  const relation = left.relation ?? right.relation;
-  return {
-    ...left,
-    names: [...new Set([...left.names, ...right.names])],
-    externalIds,
-    facts: { ...left.facts, ...right.facts },
-    ...(image ? { image } : {}),
-    ...(mediaKind ? { mediaKind } : {}),
-    ...(year !== undefined ? { year } : {}),
-    ...(relation ? { relation } : {}),
-  };
-}
-
-function preferredMediaKind(
-  left: ProviderRelatedEntity["mediaKind"],
-  right: ProviderRelatedEntity["mediaKind"],
-): ProviderRelatedEntity["mediaKind"] {
-  if (!left || left === "unknown") return right ?? left;
-  return left;
 }
 
 function summarizeProviderRun(run: ProviderRun<ProviderRelatedEntity>): ProviderRunSummary {

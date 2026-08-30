@@ -21,7 +21,7 @@
   },
   "type": "module",
   "bin": {
-    "ani-resolver": "dist/cli.js"
+    "ani-resolver": "dist/bin.js"
   },
   "exports": {
     ".": {
@@ -38,7 +38,7 @@
     "build": "tsc -p tsconfig.json && vite build --config web/vite.config.ts",
     "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "dev:web": "vite --config web/vite.config.ts",
-    "start:web": "node dist/cli.js web",
+    "start:web": "node dist/bin.js web",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepack": "npm run check && npm run test && npm run build"

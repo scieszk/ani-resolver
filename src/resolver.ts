@@ -1,5 +1,6 @@
 import { hasAppearanceFacts, normalizeAppearance } from "./appearance.js";
 import { parseContentInput } from "./input.js";
+import { deriveResolutionOutcome } from "./outcome.js";
 import { selectProvidersForOperation } from "./provider-selection.js";
 import type {
   CharacterAppearance,
@@ -64,6 +65,7 @@ export class Resolver {
     if (exact.length > 0) {
       return {
         schemaVersion: "ani-resolver.resolve.v1",
+        outcome: "matched",
         query: publicQuery,
         candidates: exact,
         providerRuns: [],
@@ -84,11 +86,13 @@ export class Resolver {
       query,
     ).slice(0, limit);
 
+    const publicRuns = providerRuns.map(summarizeProviderRun);
     return {
       schemaVersion: "ani-resolver.resolve.v1",
+      outcome: deriveResolutionOutcome(candidates.length, publicRuns),
       query: publicQuery,
       candidates,
-      providerRuns: providerRuns.map(summarizeProviderRun),
+      providerRuns: publicRuns,
     };
   }
 }

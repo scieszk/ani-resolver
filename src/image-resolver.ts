@@ -1,4 +1,5 @@
 import { parseImageInput, publicImageEvidence } from "./image-input.js";
+import { deriveResolutionOutcome } from "./outcome.js";
 import { selectProvidersForOperation } from "./provider-selection.js";
 import type {
   ImageMatch,
@@ -36,18 +37,21 @@ export class ImageResolver {
       providers.map((provider) => runProvider(provider, query, this.providerTimeoutMs)),
     );
     const publicRuns = runs.map((run) => redactRunMessage(run, input));
+    const matches = publicRuns.flatMap((run) => run.items);
+    const providerRuns = publicRuns.map((run) => ({
+      provider: run.provider,
+      status: run.status,
+      itemCount: run.items.length,
+      ...(run.message ? { message: run.message } : {}),
+      ...(run.elapsedMs !== undefined ? { elapsedMs: run.elapsedMs } : {}),
+    }));
 
     return {
       schemaVersion: "ani-resolver.image.v1",
+      outcome: deriveResolutionOutcome(matches.length, providerRuns),
       query: publicImageEvidence(input),
-      matches: publicRuns.flatMap((run) => run.items),
-      providerRuns: publicRuns.map((run) => ({
-        provider: run.provider,
-        status: run.status,
-        itemCount: run.items.length,
-        ...(run.message ? { message: run.message } : {}),
-        ...(run.elapsedMs !== undefined ? { elapsedMs: run.elapsedMs } : {}),
-      })),
+      matches,
+      providerRuns,
     };
   }
 }

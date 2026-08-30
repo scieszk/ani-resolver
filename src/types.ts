@@ -23,6 +23,7 @@ export type ProviderStatus =
   | "unavailable"
   | "invalid_response"
   | "policy_blocked";
+export type ResolutionOutcome = "matched" | "no_match" | "partial" | "unavailable";
 
 export interface ExternalId {
   source: string;
@@ -193,13 +194,14 @@ export interface ImageResolveRequest {
 
 export interface ImageResolveResult {
   schemaVersion: "ani-resolver.image.v1";
+  outcome: ResolutionOutcome;
   query: ImageEvidence;
   matches: ImageMatch[];
   providerRuns: ProviderRunSummary[];
 }
 
 export interface ContentEvidence {
-  kind: "text" | "release_name" | "path" | "torrent" | "magnet";
+  kind: "text" | "release_name" | "path" | "directory" | "torrent" | "magnet";
   raw: string;
   display: string;
   title: string;
@@ -209,6 +211,7 @@ export interface ContentEvidence {
   mediaKind: MediaKind | undefined;
   externalIds: ExternalId[];
   files: string[];
+  skippedSymlinkCount?: number;
 }
 
 export interface ResolveRequest {
@@ -236,6 +239,7 @@ export interface ResolvedCandidate {
 
 export interface ResolveResult {
   schemaVersion: "ani-resolver.resolve.v1";
+  outcome: ResolutionOutcome;
   query: ContentEvidence & {
     entityType: EntityType;
     work?: ExternalId;

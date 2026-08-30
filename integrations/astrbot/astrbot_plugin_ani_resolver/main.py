@@ -8,6 +8,8 @@ from astrbot.api.star import Context, Star, register
 from .runner import (
     AniResolverRunner,
     build_entity_get_args,
+    build_entity_relations_args,
+    build_inventory_args,
     build_parse_args,
     build_provider_list_args,
     build_resolve_character_args,
@@ -15,6 +17,7 @@ from .runner import (
     build_resolve_image_args,
     build_work_characters_args,
     resolve_event_image_input,
+    resolve_event_torrent_input,
 )
 
 
@@ -22,7 +25,7 @@ from .runner import (
     "astrbot_plugin_ani_resolver",
     "scieszk",
     "为 AstrBot 提供动画作品、角色和外部 ID 的多源识别工具",
-    "0.4.0",
+    "0.5.0",
 )
 class AniResolverPlugin(Star):
     def __init__(self, context: Context):
@@ -52,33 +55,61 @@ class AniResolverPlugin(Star):
         return await self._build_and_invoke(build_provider_list_args)
 
     @filter.llm_tool(name="ani_resolver_parse")
-    async def parse_content(self, event: AstrMessageEvent, input: str) -> str:
+    async def parse_content(self, event: AstrMessageEvent, input: str = "") -> str:
         """解析标题、发布名、路径、种子或磁力链接中的作品、季度、集数和外部 ID 证据。
 
         Args:
-            input(string): 用户提供的标题、发布名、路径、种子路径或磁力链接
+            input(string): 可选标题、发布名、路径、种子路径或磁力链接；留空读取当前或被回复消息中的种子文件
         """
-        return await self._build_and_invoke(build_parse_args, input)
+        resolved_input = input.strip() or await resolve_event_torrent_input(event)
+        if not resolved_input:
+            return _missing_torrent_input()
+        return await self._build_and_invoke(build_parse_args, resolved_input)
+
+    @filter.llm_tool(name="ani_resolver_inventory")
+    async def inventory_content(
+        self,
+        event: AstrMessageEvent,
+        input: str = "",
+        full_files: bool = False,
+    ) -> str:
+        """递归清点目录、文件或种子并按季度和集数分组，不移动或重命名任何文件。
+
+        Args:
+            input(string): 可选目录、文件、种子路径或磁力链接；留空读取当前或被回复消息中的种子文件
+            full_files(boolean): 是否返回所有文件；默认 false，仅返回适合 AI 处理的紧凑清单
+        """
+        resolved_input = input.strip() or await resolve_event_torrent_input(event)
+        if not resolved_input:
+            return _missing_torrent_input()
+        return await self._build_and_invoke(
+            build_inventory_args,
+            resolved_input,
+            full_files=full_files,
+        )
 
     @filter.llm_tool(name="ani_resolver_resolve_work")
     async def resolve_work(
         self,
         event: AstrMessageEvent,
-        input: str,
         providers: str,
+        input: str = "",
         top: int = 5,
     ) -> str:
         """将动画标题、发布名、路径、种子或磁力链接解析为多个作品候选及跨源 ID。
 
         Args:
-            input(string): 要识别的内容
+            input(string): 可选识别内容；留空读取当前或被回复消息中的种子文件
             top(number): 返回候选数量，1 到 20，默认 5
             providers(string): 必选的逗号分隔数据源 ID，或显式传入 all；应先调用数据源列表选择
         """
+        resolved_input = input.strip() or await resolve_event_torrent_input(event)
+        if not resolved_input:
+            return _missing_torrent_input()
         return await self._build_and_invoke(
             build_resolve_args,
             "work",
-            input,
+            resolved_input,
             top=top,
             providers=providers,
         )
@@ -178,6 +209,28 @@ class AniResolverPlugin(Star):
             provider,
         )
 
+    @filter.llm_tool(name="ani_resolver_entity_relations")
+    async def entity_relations(
+        self,
+        event: AstrMessageEvent,
+        entity_type: str,
+        external_ids: str,
+        providers: str,
+    ) -> str:
+        """从多个数据源合并已确认实体关联的作品、角色与人物。
+
+        Args:
+            entity_type(string): 起点实体类型，只能是 work 或 character
+            external_ids(string): 逗号分隔的同一实体外部 ID，例如 bangumi:400602,anilist:154587
+            providers(string): 必选的逗号分隔数据源 ID，或显式传入 all
+        """
+        return await self._build_and_invoke(
+            build_entity_relations_args,
+            entity_type,
+            external_ids,
+            providers=providers,
+        )
+
     @filter.llm_tool(name="ani_resolver_work_characters")
     async def work_characters(
         self,
@@ -200,3 +253,7 @@ class AniResolverPlugin(Star):
 
 def _json_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
+
+
+def _missing_torrent_input() -> str:
+    return '{"schemaVersion":"ani-resolver.astrbot-error.v1","error":{"code":"input_unavailable","message":"Provide text or a path, or attach a torrent file to the current or replied message"}}'

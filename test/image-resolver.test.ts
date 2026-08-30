@@ -90,6 +90,7 @@ describe("ImageResolver", () => {
 
     expect(result).toEqual({
       schemaVersion: "ani-resolver.image.v1",
+      outcome: "matched",
       query: { kind: "url", display: "https://example.test/frame.jpg" },
       matches: [imageMatch("scene", 1), imageMatch("scene", 2)],
       providerRuns: [
@@ -116,6 +117,7 @@ describe("ImageResolver", () => {
     });
 
     expect(result.matches).toEqual([{ ...imageMatch("source", 1), matchType: "source" }]);
+    expect(result.outcome).toBe("partial");
     expect(result.providerRuns).toEqual([
       expect.objectContaining({
         provider: "failed",
@@ -125,6 +127,22 @@ describe("ImageResolver", () => {
       }),
       expect.objectContaining({ provider: "source", status: "ok", itemCount: 1 }),
     ]);
+  });
+
+  it("reports unavailable when no selected image provider could run", async () => {
+    const failed = new ImageFixtureProvider("failed", async () => ({
+      provider: "failed",
+      status: "rate_limited",
+      items: [],
+      message: "quota exhausted",
+    }));
+
+    const result = await new ImageResolver([failed]).resolve({
+      input: "https://example.test/frame.png",
+      providers: ["failed"],
+    });
+
+    expect(result.outcome).toBe("unavailable");
   });
 
   it("redacts a signed input URL echoed by a provider error", async () => {

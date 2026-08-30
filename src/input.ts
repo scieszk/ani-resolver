@@ -3,6 +3,7 @@ import path from "node:path";
 
 import parseTorrent from "parse-torrent";
 
+import { scanDirectoryFiles } from "./local-files.js";
 import type { ContentEvidence, ExternalId, MediaKind } from "./types.js";
 
 const MEDIA_EXTENSIONS = new Set([
@@ -50,6 +51,21 @@ export async function parseContentInput(rawInput: string): Promise<ContentEviden
     return buildEvidence("torrent", raw, display, torrent.files?.map((file) => file.path) ?? []);
   }
 
+  if (fileStat?.isDirectory()) {
+    const scan = await scanDirectoryFiles(raw);
+    return buildEvidence(
+      "directory",
+      raw,
+      selectEvidenceSegment(raw),
+      scan.files.map((file) => file.path),
+      { skippedSymlinkCount: scan.skippedSymlinkCount },
+    );
+  }
+
+  if (fileStat?.isFile()) {
+    return buildEvidence("path", raw, selectEvidenceSegment(raw), [path.basename(raw)]);
+  }
+
   const looksLikePath = Boolean(fileStat) || /[\\/]/.test(raw);
   const kind = looksLikePath ? "path" : looksLikeReleaseName(raw) ? "release_name" : "text";
   const display = looksLikePath ? selectEvidenceSegment(raw) : raw;
@@ -70,6 +86,7 @@ function buildEvidence(
   raw: string,
   display: string,
   files: string[],
+  scan: { skippedSymlinkCount?: number } = {},
 ): ContentEvidence {
   const season =
     extractNumber(raw, /(?:^|\b)(?:season\s*|s)(\d{1,2})(?:\b|e\d{1,3})/i) ??
@@ -92,6 +109,7 @@ function buildEvidence(
     mediaKind,
     externalIds,
     files,
+    ...(scan.skippedSymlinkCount ? { skippedSymlinkCount: scan.skippedSymlinkCount } : {}),
   };
 }
 
@@ -162,8 +180,29 @@ function extractEpisode(value: string): number | undefined {
   return (
     extractNumber(value, /\bS\d{1,2}E(\d{1,3})\b/i) ??
     extractNumber(value, /\s-\s(\d{1,3})(?:\s|\[|$)/) ??
-    extractNumber(value, /\[(\d{1,3})\](?!\d)/)
+    extractNumber(value, /\[(\d{1,3})\](?!\d)/) ??
+    extractPlainEpisodeFilename(value)
   );
+}
+
+function extractPlainEpisodeFilename(value: string): number | undefined {
+  const filename = path.posix.basename(value.replaceAll("\\", "/"));
+  return extractNumber(
+    filename,
+    /^(?:(?:episode|ep|e)[ ._-]*)?(\d{1,3})(?=(?:[._-][a-z0-9_-]+)*\.(?:avi|flv|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|ogm|rmvb|ts|webm|wmv|ass|idx|mks|smi|ssa|srt|sub|sup|vtt|mka)$)/i,
+  );
+}
+
+export function parseEpisodeIdentity(value: string): {
+  season?: number;
+  episode?: number;
+} {
+  const season = extractNumber(value, /(?:^|\b)(?:season\s*|s)(\d{1,2})(?:\b|e\d{1,3})/i);
+  const episode = extractEpisode(value);
+  return {
+    ...(season !== undefined ? { season } : {}),
+    ...(episode !== undefined ? { episode } : {}),
+  };
 }
 
 function inferMediaKind(value: string, season: number | undefined): MediaKind | undefined {

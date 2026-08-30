@@ -1,4 +1,11 @@
 export { parseContentInput } from "./input.js";
+export { compactContentInventory, inspectContentInventory } from "./inventory.js";
+export type {
+  ContentInventory,
+  InventoryEpisodeGroup,
+  InventoryFile,
+  InventoryFileKind,
+} from "./inventory.js";
 export {
   CHARACTER_APPEARANCE_OPTIONS,
   emptyAppearance,
@@ -13,6 +20,17 @@ export type { AppearanceField } from "./appearance.js";
 export { KeyringCredentialStore } from "./credentials.js";
 export { parseImageInput, publicImageEvidence } from "./image-input.js";
 export { ImageResolver } from "./image-resolver.js";
+export {
+  EntityRelationsResolver,
+  externalIdsOverlap,
+  mergeRelatedEntities,
+  runProviderRelations,
+} from "./entity-relations.js";
+export type {
+  EntityRelationsRequest,
+  EntityRelationsResolverOptions,
+  EntityRelationsResult,
+} from "./entity-relations.js";
 export { ProviderHost, ProviderRegistryService } from "./provider-host.js";
 export { ProviderManager, validateProviderPackageManifest } from "./provider-management.js";
 export {

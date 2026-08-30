@@ -1,11 +1,16 @@
 import type { Provider, ProviderCapability } from "./types.js";
 
-export type ProviderOperation = "resolve.work" | "resolve.character" | "resolve.image";
+export type ProviderOperation =
+  | "resolve.work"
+  | "resolve.character"
+  | "resolve.image"
+  | "entity.relations";
 
 export type ProviderSelectionErrorCode =
   | "missing_provider_selection"
   | "invalid_provider_selection"
   | "unknown_provider"
+  | "provider_not_ready"
   | "unsupported_provider_capability";
 
 export interface ProviderSelectionErrorDetails {
@@ -13,6 +18,7 @@ export interface ProviderSelectionErrorDetails {
   providers: string[];
   requiredCapabilities: ProviderCapability[];
   compatibleProviders: string[];
+  providerStatuses?: Array<{ id: string; status: string }>;
 }
 
 export class ProviderSelectionError extends Error {
@@ -35,12 +41,14 @@ const operationCapabilities: Record<ProviderOperation, ProviderCapability[]> = {
     "reverse_image_lookup",
     "character_image_lookup",
   ],
+  "entity.relations": ["entity_relations"],
 };
 
 const operationLabels: Record<ProviderOperation, string> = {
   "resolve.work": "work search",
   "resolve.character": "character search",
   "resolve.image": "image lookup",
+  "entity.relations": "entity relation lookup",
 };
 
 export function selectProvidersForOperation(
@@ -118,6 +126,9 @@ function supportsOperation(provider: Provider, operation: ProviderOperation): bo
   }
   if (operation === "resolve.character") {
     return capabilities.includes("character_search") && Boolean(provider.searchCharacters);
+  }
+  if (operation === "entity.relations") {
+    return capabilities.includes("entity_relations") && Boolean(provider.listEntityRelations);
   }
   return (
     operationCapabilities[operation].some((capability) => capabilities.includes(capability)) &&
