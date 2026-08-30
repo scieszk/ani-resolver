@@ -7,6 +7,7 @@ export interface DisplayExternalId {
 }
 
 export interface DisplayResultItem {
+  key: string;
   entityType: string;
   title: string;
   alternateNames: string[];
@@ -36,8 +37,17 @@ export function resultItems(result: unknown): DisplayResultItem[] {
 
 export function summarizeRun(run: WebRun): HistorySummary {
   const first = resultItems(run.result)[0];
+  const appearance = run.query?.appearance;
+  const conditions = appearance
+    ? Object.values(appearance).flat().map(humanize).slice(0, 4)
+    : [];
+  const queryInput = [
+    run.input,
+    run.query?.work ? `${run.query.work.source}:${run.query.work.id}` : "",
+    ...conditions,
+  ].filter(Boolean).join(" · ");
   return {
-    input: run.input || run.attachments.map((attachment) => attachment.fileName).join(", ") || "Untitled run",
+    input: queryInput || run.attachments.map((attachment) => attachment.fileName).join(", ") || "Untitled run",
     output: first?.title ?? (run.status === "failed" ? "Failed" : run.status === "pending" ? "Resolving" : "No match"),
     ...(first?.confidence !== undefined ? { confidence: first.confidence } : {}),
     entityType: first?.entityType ?? run.resolvedTarget,
@@ -77,6 +87,7 @@ function normalizeItem(item: Record<string, unknown>): DisplayResultItem {
     .slice(0, 6)
     .map(([key, value]) => ({ label: humanize(key), value: displayValue(value) }));
   return {
+    key: itemKey(item, entityType, names[0]),
     entityType,
     title: names[0] ?? firstString(item.title, item.name) ?? "Untitled result",
     alternateNames: names.slice(1),
@@ -89,6 +100,23 @@ function normalizeItem(item: Record<string, unknown>): DisplayResultItem {
     providers: [...new Set(providers)],
     raw: item,
   };
+}
+
+function itemKey(
+  item: Record<string, unknown>,
+  entityType: string,
+  title: string | undefined,
+): string {
+  const explicit = stringValue(item.key);
+  if (explicit) return explicit;
+  const provider = stringValue(item.provider);
+  const providerId = stringValue(item.providerId);
+  if (provider && providerId) return `${entityType}:${provider}:${providerId}`;
+  const id = arrayOfRecords(item.externalIds)[0];
+  const source = stringValue(id?.source);
+  const externalId = stringValue(id?.id);
+  if (source && externalId) return `${entityType}:${source}:${externalId}`;
+  return `${entityType}:derived:${(title ?? "untitled").normalize("NFKC").toLocaleLowerCase()}`;
 }
 
 function normalizeConfidence(item: Record<string, unknown>): number | undefined {

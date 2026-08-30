@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  emptyAppearance,
   hasAppearanceFacts,
   parseAppearanceText,
   scoreAppearanceMatch,
@@ -148,6 +149,16 @@ export class BangumiProvider implements Provider {
       };
     }
 
+
+    if (!query.text.trim()) {
+      return {
+        provider: this.manifest.id,
+        status: "unsupported",
+        items: [],
+        message: "Bangumi appearance filtering requires a character name or a Bangumi work ID",
+      };
+    }
+
     const result = await requestJson(
       this.manifest.id,
       this.fetcher,
@@ -269,7 +280,7 @@ function characterCandidate(
     [character.summary ?? "", ...Object.values(infobox).flatMap((value) => Array.isArray(value) ? value : [value])]
       .join("\n"),
   );
-  const requestedAppearance = parseAppearanceText(query.text);
+  const requestedAppearance = query.appearance ?? emptyAppearance();
   const match = scoreAppearanceMatch(requestedAppearance, appearance);
   const base = Math.max(0.5, 0.82 - Math.min(index, 10) * 0.025);
   return {
@@ -303,7 +314,7 @@ function characterCandidate(
 }
 
 function rankCharacterCandidate(candidate: ProviderCandidate, query: ResolveQuery): ProviderCandidate {
-  const requested = parseAppearanceText(query.text);
+  const requested = query.appearance ?? emptyAppearance();
   const appearance = parseAppearanceText(JSON.stringify(candidate.facts));
   const match = scoreAppearanceMatch(requested, appearance);
   return {

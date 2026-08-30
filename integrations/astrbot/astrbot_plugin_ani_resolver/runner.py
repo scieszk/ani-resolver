@@ -10,6 +10,7 @@ DEFAULT_EXECUTABLE = "/srv/ani-resolver/bin/ani-resolver"
 MAX_INPUT_LENGTH = 10_000
 MAX_OUTPUT_BYTES = 512_000
 PROVIDER_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+TAG_VALUE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 EXTERNAL_ID = re.compile(
     r"^(?:(?:bangumi|bgm|tmdb-tv|tmdb-movie|anilist):[0-9]+|wikidata:Q[1-9][0-9]*)$"
 )
@@ -43,6 +44,54 @@ def build_resolve_args(
             raise ValueError("work constraint is only valid for character resolution")
         args.extend(["--work", _external_id(work)])
     args.append("--json")
+    return args
+
+
+def build_resolve_character_args(
+    *,
+    providers: str,
+    name: str = "",
+    work: str = "",
+    top: int = 5,
+    hair_colors: str = "",
+    eye_colors: str = "",
+    hair_styles: str = "",
+    genders: str = "",
+    apparent_ages: str = "",
+    clothing: str = "",
+    traits: str = "",
+) -> list[str]:
+    args = ["resolve", "character"]
+    normalized_name = name.strip()
+    if normalized_name:
+        args.extend(["--name", _input(normalized_name)])
+    if work:
+        args.extend(["--work", _external_id(work)])
+
+    structured = (
+        ("--hair-color", hair_colors, "hair color"),
+        ("--eye-color", eye_colors, "eye color"),
+        ("--hair-style", hair_styles, "hair style"),
+        ("--gender", genders, "gender"),
+        ("--apparent-age", apparent_ages, "apparent age"),
+        ("--clothing", clothing, "clothing"),
+        ("--trait", traits, "trait"),
+    )
+    has_appearance = False
+    for option, value, label in structured:
+        normalized = _tags(value, label)
+        if not normalized:
+            continue
+        args.extend([option, normalized])
+        has_appearance = True
+
+    if not normalized_name and not work and not has_appearance:
+        raise ValueError("character query requires a name, work, or appearance tag")
+
+    normalized_providers = _providers(providers)
+    if not normalized_providers:
+        raise ValueError("provider list must not be empty")
+    args.extend(["--top", str(_top(top)), "--providers", normalized_providers, "--json"])
     return args
 
 
@@ -206,6 +255,18 @@ def _provider(value: str) -> str:
     if not PROVIDER_ID.fullmatch(normalized):
         raise ValueError(f"invalid provider ID: {normalized}")
     return normalized
+
+
+def _tags(value: str, label: str) -> str:
+    if not value.strip():
+        return ""
+    values = [item.strip().lower() for item in value.split(",") if item.strip()]
+    if not values or len(values) > 20:
+        raise ValueError(f"{label} tag list must contain between 1 and 20 values")
+    for item in values:
+        if len(item) > 64 or not TAG_VALUE.fullmatch(item):
+            raise ValueError(f"invalid {label} tag: {item}")
+    return ",".join(dict.fromkeys(values))
 
 
 def _external_id(value: str) -> str:

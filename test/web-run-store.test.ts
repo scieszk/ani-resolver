@@ -143,4 +143,51 @@ describe("RunStore", () => {
     await expect(access(attachment.path!)).rejects.toThrow();
     await store.close();
   });
+
+  it("deduplicates favorites and keeps their snapshot after history is deleted", async () => {
+    const store = await createStore();
+    const run = await store.createRun({
+      input: "Isla",
+      requestedTarget: "character",
+      resolvedTarget: "character",
+      providers: ["anilist"],
+    });
+    const candidate = {
+      key: "character:anilist:unknown:12080",
+      entityType: "character",
+      names: ["Isla"],
+      facts: { image: "https://example.test/isla.jpg" },
+    };
+    const first = await store.saveFavorite({
+      entityKey: candidate.key,
+      entityType: "character",
+      title: "Isla",
+      image: "https://example.test/isla.jpg",
+      candidate,
+      sourceRunId: run.id,
+    });
+    const duplicate = await store.saveFavorite({
+      entityKey: candidate.key,
+      entityType: "character",
+      title: "アイラ / Isla",
+      candidate,
+      sourceRunId: run.id,
+    });
+
+    expect(duplicate.id).toBe(first.id);
+    expect((await store.listFavorites({ query: "Isla" })).items).toHaveLength(1);
+    expect((await store.listFavorites({ entityType: "work" })).items).toHaveLength(0);
+
+    await store.deleteRun(run.id);
+    expect(await store.getFavorite(first.id)).toMatchObject({
+      id: first.id,
+      entityKey: candidate.key,
+      title: "アイラ / Isla",
+      candidate,
+    });
+    expect((await store.getFavorite(first.id))?.sourceRunId).toBeUndefined();
+    expect(await store.deleteFavorite(first.id)).toBe(true);
+    expect(await store.getFavorite(first.id)).toBeNull();
+    await store.close();
+  });
 });

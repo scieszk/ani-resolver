@@ -26,7 +26,14 @@ async function fixture() {
     resolvedTarget: request.target === "auto" ? "character" : request.target,
     result: {
       schemaVersion: "ani-resolver.resolve.v1",
-      candidates: [{ names: ["Isla"], score: 0.91, entityType: "character" }],
+      candidates: [{
+        key: "character:anilist:unknown:12080",
+        names: ["Isla"],
+        score: 0.91,
+        entityType: "character",
+        facts: { image: "https://example.test/isla.jpg" },
+        externalIds: [{ source: "anilist", id: "12080" }],
+      }],
       providerRuns: [{ provider: "anilist", status: "ok", itemCount: 1 }],
     },
   }));
@@ -74,24 +81,40 @@ describe("ani-resolver web API", () => {
       method: "POST",
       url: "/api/runs",
       payload: {
-        input: "女主是白发双马尾，前期没什么表情",
-        target: "auto",
+        input: "Isla",
+        target: "character",
         providers: ["all"],
+        appearance: {
+          hairColors: ["white"],
+          hairStyles: ["twintails"],
+          traits: ["expressionless"],
+        },
       },
     });
     expect(created.statusCode).toBe(201);
     expect(created.json()).toMatchObject({
-      input: "女主是白发双马尾，前期没什么表情",
-      requestedTarget: "auto",
+      input: "Isla",
+      requestedTarget: "character",
       resolvedTarget: "character",
       status: "completed",
+      query: {
+        appearance: expect.objectContaining({
+          hairColors: ["white"],
+          hairStyles: ["twintails"],
+          traits: ["expressionless"],
+        }),
+      },
     });
     expect(resolve).toHaveBeenCalledWith(
-      expect.objectContaining({ target: "auto", providers: ["all"] }),
+      expect.objectContaining({
+        target: "character",
+        providers: ["all"],
+        appearance: expect.objectContaining({ hairColors: ["white"] }),
+      }),
     );
 
     const id = created.json().id as string;
-    const list = await app.inject({ method: "GET", url: "/api/runs?query=白发" });
+    const list = await app.inject({ method: "GET", url: "/api/runs?query=twintails" });
     expect(list.json().items).toHaveLength(1);
     const detail = await app.inject({ method: "GET", url: `/api/runs/${id}` });
     expect(detail.json().result.candidates[0].names[0]).toBe("Isla");
@@ -102,11 +125,114 @@ describe("ani-resolver web API", () => {
     await store.close();
   });
 
+  it("rejects automatic target inference for new runs", async () => {
+    const { app, store, resolve } = await fixture();
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: { input: "white-haired girl", target: "auto", providers: ["all"] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { code: "invalid_request" },
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    await app.close();
+    await store.close();
+  });
+
+  it("rejects malformed structured character fields before resolution", async () => {
+    const { app, store, resolve } = await fixture();
+    const malformedAppearance = await app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: {
+        input: "Isla",
+        target: "character",
+        providers: ["wikidata"],
+        appearance: { hairColors: "white" },
+      },
+    });
+    const malformedWork = await app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: {
+        input: "Isla",
+        target: "character",
+        providers: ["wikidata"],
+        work: { source: "wikidata", id: "Q1. } UNION {" },
+      },
+    });
+
+    expect(malformedAppearance.statusCode).toBe(400);
+    expect(malformedAppearance.json().error.message).toContain("appearance.hairColors");
+    expect(malformedWork.statusCode).toBe(400);
+    expect(malformedWork.json().error.message).toContain("Wikidata QID");
+    expect(resolve).not.toHaveBeenCalled();
+    await app.close();
+    await store.close();
+  });
+
+  it("normalizes object-form work identifiers before resolution", async () => {
+    const { app, store, resolve } = await fixture();
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: {
+        input: "Isla",
+        target: "character",
+        providers: ["bangumi"],
+        work: { source: " bgm ", id: " 265 " },
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(resolve).toHaveBeenCalledWith(
+      expect.objectContaining({ work: { source: "bangumi", id: "265" } }),
+    );
+    await app.close();
+    await store.close();
+  });
+
+  it("creates, searches, and deletes favorite candidate snapshots", async () => {
+    const { app, store } = await fixture();
+    const createdRun = await app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: { input: "Isla", target: "character", providers: ["all"] },
+    });
+    const runId = createdRun.json().id as string;
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/favorites",
+      payload: { runId, candidateKey: "character:anilist:unknown:12080" },
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      entityKey: "character:anilist:unknown:12080",
+      entityType: "character",
+      title: "Isla",
+      sourceRunId: runId,
+    });
+    const favoriteId = created.json().id as string;
+    const list = await app.inject({ method: "GET", url: "/api/favorites?query=Isla&type=character" });
+    expect(list.json()).toMatchObject({ total: 1, items: [{ id: favoriteId }] });
+
+    await app.inject({ method: "DELETE", url: `/api/runs/${runId}` });
+    const retained = await app.inject({ method: "GET", url: "/api/favorites" });
+    expect(retained.json().items[0]).not.toHaveProperty("sourceRunId");
+    expect((await app.inject({ method: "DELETE", url: `/api/favorites/${favoriteId}` })).statusCode).toBe(204);
+    await app.close();
+    await store.close();
+  });
+
   it("stores accepted image uploads and rejects unsupported attachments explicitly", async () => {
     const { app, store } = await fixture();
     const acceptedForm = new FormData();
     acceptedForm.set("input", "这是谁");
-    acceptedForm.set("target", "auto");
+    acceptedForm.set("target", "image");
     acceptedForm.set("providers", "all");
     acceptedForm.append("attachments", new File(["png"], "frame.png", { type: "image/png" }));
     const accepted = await injectForm(app, acceptedForm);

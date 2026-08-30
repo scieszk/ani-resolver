@@ -5,6 +5,7 @@ import type {
   StorageStats,
   WebProvider,
   WebRun,
+  WebFavorite,
 } from "./types.js";
 
 export class ApiError extends Error {
@@ -36,11 +37,31 @@ export const webApi: AniResolverApi = {
     body.set("input", input.input);
     body.set("target", input.target);
     body.set("providers", input.providers.join(","));
+    if (input.appearance) body.set("appearance", JSON.stringify(input.appearance));
+    if (input.work) body.set("work", JSON.stringify(input.work));
     for (const attachment of input.attachments) body.append("attachments", attachment);
     return request<WebRun>("/api/runs", { method: "POST", body });
   },
   async deleteRun(id) {
     await request<void>(`/api/runs/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  async listFavorites(query = "", entityType = "") {
+    const search = new URLSearchParams();
+    if (query) search.set("query", query);
+    if (entityType) search.set("type", entityType);
+    return request<{ items: WebFavorite[]; total: number }>(
+      `/api/favorites${search.size ? `?${search}` : ""}`,
+    );
+  },
+  async saveFavorite(runId, candidateKey) {
+    return request<WebFavorite>("/api/favorites", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId, candidateKey }),
+    });
+  },
+  async deleteFavorite(id) {
+    await request<void>(`/api/favorites/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
   async listProviders() {
     return request<{ items: WebProvider[] }>("/api/providers");

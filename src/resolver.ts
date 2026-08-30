@@ -1,3 +1,4 @@
+import { hasAppearanceFacts, normalizeAppearance } from "./appearance.js";
 import { parseContentInput } from "./input.js";
 import { selectProvidersForOperation } from "./provider-selection.js";
 import type {
@@ -34,13 +35,29 @@ export class Resolver {
       request.providers,
       `resolve.${request.entityType}`,
     );
-    const parsed = await parseContentInput(request.input);
+    const appearance = normalizeAppearance(request.appearance);
+    const hasStructuredAppearance = hasAppearanceFacts(appearance);
+    if (!request.input.trim() && request.entityType !== "character") {
+      throw new Error("input must not be empty");
+    }
+    if (
+      request.entityType === "character" &&
+      !request.input.trim() &&
+      !hasStructuredAppearance &&
+      !request.work
+    ) {
+      throw new Error("character query requires a name, work, or appearance condition");
+    }
+    const parsed = request.entityType === "character"
+      ? literalCharacterEvidence(request.input)
+      : await parseContentInput(request.input);
     const limit = Math.max(1, Math.min(request.limit ?? 5, 50));
     const query = toResolveQuery(parsed, request, limit);
     const publicQuery = {
       ...parsed,
       entityType: request.entityType,
       ...(query.work ? { work: query.work } : {}),
+      ...(query.appearance ? { appearance: query.appearance } : {}),
     };
     const exact = exactCandidates(parsed, request.entityType);
 
@@ -97,16 +114,30 @@ function toResolveQuery(
     title: parsed.title,
     limit,
   };
+  const appearance = normalizeAppearance(request.appearance);
+  if (hasAppearanceFacts(appearance)) query.appearance = appearance;
   if (parsed.year !== undefined) query.year = parsed.year;
   if (parsed.season !== undefined) query.season = parsed.season;
   if (parsed.episode !== undefined) query.episode = parsed.episode;
   if (parsed.mediaKind !== undefined) query.mediaKind = parsed.mediaKind;
   if (request.work !== undefined) query.work = request.work;
-  else if (request.entityType === "character" && parsed.externalIds.length === 1) {
-    const parsedWork = parsed.externalIds[0];
-    if (parsedWork) query.work = parsedWork;
-  }
   return query;
+}
+
+function literalCharacterEvidence(input: string): ContentEvidence {
+  const name = input.trim();
+  return {
+    kind: "text",
+    raw: name,
+    display: name,
+    title: name,
+    year: undefined,
+    season: undefined,
+    episode: undefined,
+    mediaKind: undefined,
+    externalIds: [],
+    files: [],
+  };
 }
 
 function queryForProvider(

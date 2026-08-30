@@ -1,6 +1,6 @@
 # ani-resolver
 
-`ani-resolver` is provider-based infrastructure for anime metadata resolution. Its TypeScript library and CLI turn titles, release names, paths, torrent files, magnets, character clues, and images into ranked identity or source candidates with evidence and stable JSON.
+`ani-resolver` is provider-based infrastructure for anime metadata resolution. Its TypeScript library and CLI turn titles, release names, paths, torrent files, magnets, structured character conditions, and images into ranked identity or source candidates with evidence and stable JSON.
 
 It returns data for callers to use. It does not search torrent sites, download content, rename files, move files, or delete files.
 
@@ -32,9 +32,10 @@ ani-resolver provider init saucenao --api-key "$SAUCENAO_API_KEY" --json
 ani-resolver provider init trace-moe --api-key "$TRACE_MOE_API_KEY" --json
 ani-resolver parse "[VCB-Studio] Sousou no Frieren [01][1080p].mkv" --json
 ani-resolver resolve work "葬送的芙莉莲 (2023)" --providers bangumi,anilist --top 5 --json
-ani-resolver resolve character "艾拉" --providers bangumi --top 5 --json
-ani-resolver resolve character "女主 白发 双马尾 前期没什么表情" --providers wikidata,anilist,bangumi --top 5 --json
-ani-resolver resolve character "白发 双马尾" --work anilist:154587 --providers anilist --top 5 --json
+ani-resolver resolve character --name "艾拉" --providers bangumi --top 5 --json
+ani-resolver resolve character --hair-color white --hair-style twintails --gender female --trait expressionless --providers wikidata,bangumi-archive --top 5 --json
+ani-resolver resolve character --name "艾拉" --work anilist:154587 --providers anilist --top 5 --json
+ani-resolver resolve character --input-json ./character-query.json --json
 ani-resolver resolve image ./frame.jpg --providers trace-moe --top 5 --json
 ani-resolver resolve image https://example.com/artwork.jpg --providers saucenao --top 5 --json
 ani-resolver resolve image ./character.png --providers animetrace --top 5 --json
@@ -46,7 +47,7 @@ ani-resolver work characters bangumi:400602 --provider bangumi-archive --json
 
 ## Local Web Console
 
-The same package includes a React browser UI and HTTP API for running queries, inspecting typed results, viewing provider traces, and searching run history:
+The same package includes a React browser UI and HTTP API for running queries, inspecting typed results, saving candidate favorites, viewing provider traces, and searching run history:
 
 ```bash
 npm run build
@@ -55,7 +56,7 @@ ani-resolver web --host 0.0.0.0 --port 4173 --max-storage-mb 100
 
 Open `http://<machine-ip>:4173/` from another device on the LAN. The web console has no browser access token or login layer; bind it only to a trusted network. Provider credentials stay in the server process and are never returned by the API.
 
-Each run records its text input, selected providers, inferred or explicit target, ranked result, provider status, and timing. JPEG, PNG, and torrent attachments are copied into managed storage. Deleting a run removes its stored files, and automatic cleanup purges the oldest attachment bodies when the configurable quota is exceeded while retaining the run metadata. The defaults are 500 runs and 100 MiB of stored attachments.
+Each run records its explicit target, structured query, selected providers, ranked result, provider status, and timing. Favorites store independent candidate snapshots, so deleting a run does not delete its saved candidates. JPEG, PNG, and torrent attachments are copied into managed storage. Deleting a run removes its stored files, and automatic cleanup purges the oldest attachment bodies when the configurable quota is exceeded while retaining the run metadata. The defaults are 500 runs and 100 MiB of stored attachments.
 
 For local-only access, bind to loopback instead:
 
@@ -68,6 +69,8 @@ ani-resolver web --host 127.0.0.1 --port 4173
 Successful commands emit JSON on stdout. Errors emit `ani-resolver.error.v1` JSON on stderr and use a nonzero exit code. `resolve` keeps multiple candidates unless unambiguous explicit work IDs identify one candidate; duplicate IDs from the same source remain separate possibilities. Scores are deterministic match scores, not statistical probabilities.
 
 Every `resolve work`, `resolve character`, and `resolve image` command requires an explicit `--providers` selection. Use comma-separated IDs, or pass `--providers all` to intentionally run every loaded provider compatible with that operation. `all` cannot be combined with named providers. Unknown or statically incompatible providers fail before any provider request and return a structured error such as `unknown_provider` or `unsupported_provider_capability`.
+
+Character queries are intentionally structured. The CLI treats `--name` as a literal name and accepts repeatable tags through `--hair-color`, `--eye-color`, `--hair-style`, `--gender`, `--apparent-age`, `--clothing`, and `--trait`. It does not derive those fields from a prose clue. Agents and other callers can translate user language into these flags or provide a JSON request through `--input-json <path>`; use `--input-json -` for stdin. Providers may still normalize their own source descriptions into candidate facts for matching.
 
 Torrent and directory evidence reports `fileCount` plus up to eight representative paths by default. Add `--full-files` to `parse` or `resolve` only when every path is needed.
 
@@ -95,10 +98,11 @@ Bangumi Archive is indexed locally rather than queried from the ZIP. Download a 
 ```bash
 ani-resolver provider init bangumi-archive --archive /path/to/dump.zip --json
 ani-resolver resolve work "Dungeon Meshi" --providers bangumi-archive --json
-ani-resolver resolve character "精灵" --work bangumi:395378 --providers bangumi-archive --json
+ani-resolver resolve character --name "玛露希尔" --work bangumi:395378 --providers bangumi-archive --json
+ani-resolver resolve character --hair-color white --hair-style twintails --providers bangumi-archive --json
 ```
 
-Initialization streams the dump into an anime-only SQLite FTS5 index. It retains related character text and work relations, but it cannot infer appearance traits absent from Archive text.
+Initialization streams the dump into an anime-only SQLite FTS5 index. It retains related character text, normalized appearance tags, and work relations, but it cannot recover traits absent from Archive text. Re-run `provider init bangumi-archive` after upgrading an older index that predates structured appearance search.
 
 Wikidata can search structured hair color, eye color, hairstyle, gender, and clothing statements and return cross-source character IDs. AniList adds profile text and work cast data. Coverage is uneven, so the CLI returns several candidates plus `facts.appearance`, matched/missing evidence, and isolated provider statuses. Callers decide how to clarify or act on uncertain results.
 

@@ -494,6 +494,49 @@ describe("Resolver", () => {
     expect(result.query).toMatchObject({ work });
   });
 
+  it("passes explicit structured appearance without extracting clues from the name", async () => {
+    const observed: ResolveQuery[] = [];
+    const provider: Provider = {
+      manifest: {
+        ...manifest("characters"),
+        capabilities: ["character_search", "character_appearance_search"],
+      },
+      async searchCharacters(query) {
+        observed.push(query);
+        return { provider: "characters", status: "empty", items: [] };
+      },
+    };
+    const resolver = new Resolver([provider]);
+
+    await resolver.resolve({
+      entityType: "character",
+      input: "white-haired girl with twintails",
+      providers: ["characters"],
+    });
+    const result = await resolver.resolve({
+      entityType: "character",
+      input: "",
+      appearance: {
+        hairColors: ["white"],
+        hairStyles: ["twintails"],
+        genders: ["female"],
+      },
+      providers: ["characters"],
+    });
+
+    expect(observed[0]?.appearance).toBeUndefined();
+    expect(observed[1]?.appearance).toEqual({
+      hairColors: ["white"],
+      eyeColors: [],
+      hairStyles: ["twintails"],
+      genders: ["female"],
+      apparentAges: [],
+      clothing: [],
+      traits: [],
+    });
+    expect(result.query).toMatchObject({ appearance: observed[1]?.appearance });
+  });
+
   it("rejects unknown provider selections", async () => {
     await expect(
       new Resolver([]).resolve({
@@ -504,23 +547,28 @@ describe("Resolver", () => {
     ).rejects.toThrow("Unknown provider: missing");
   });
 
-  it("uses a parsed work ID to constrain character providers", async () => {
-    let observedWork: ResolveQuery["work"];
+  it("treats a character name literally and never derives a work constraint from it", async () => {
+    let observedQuery: ResolveQuery | undefined;
     const provider: Provider = {
       manifest: { ...manifest("bangumi"), capabilities: ["character_search"] },
       async searchCharacters(query) {
-        observedWork = query.work;
+        observedQuery = query;
         return { provider: "bangumi", status: "empty", items: [] };
       },
     };
 
+    const name = "Example [bgmid=400602]/Season 1/Example S01E01.mkv";
+
     const result = await new Resolver([provider]).resolve({
       entityType: "character",
-      input: "Example [bgmid=400602]/Season 1/Example S01E01.mkv",
+      input: name,
       providers: ["bangumi"],
     });
 
-    expect(observedWork).toEqual({ source: "bangumi", id: "400602" });
-    expect(result.query.work).toEqual(observedWork);
+    expect(observedQuery).toMatchObject({ text: name, title: name });
+    expect(observedQuery?.work).toBeUndefined();
+    expect(result.query).toMatchObject({ kind: "text", display: name, title: name });
+    expect(result.query.work).toBeUndefined();
+    expect(result.query.externalIds).toEqual([]);
   });
 });

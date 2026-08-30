@@ -39,7 +39,16 @@ describe("WikidataProvider", () => {
 
     const result = await provider.searchCharacters({
       entityType: "character",
-      text: "女主 白发 双马尾 前期没什么表情",
+      text: "",
+      appearance: {
+        hairColors: ["white"],
+        eyeColors: [],
+        hairStyles: ["twintails"],
+        genders: ["female"],
+        apparentAges: [],
+        clothing: [],
+        traits: ["expressionless"],
+      },
       limit: 5,
     });
 
@@ -111,6 +120,40 @@ describe("WikidataProvider", () => {
     expect(detailQuery).toContain("?character wdt:P31/wdt:P279* wd:Q95074");
   });
 
+  it("keeps a literal name as a constraint when appearance fields are also present", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          search: [{ id: "Q104144455", label: "Frieren", description: "fictional character" }],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ head: { vars: [] }, results: { bindings } }));
+    const provider = new WikidataProvider({ fetcher });
+
+    await provider.searchCharacters({
+      entityType: "character",
+      text: "Frieren",
+      appearance: {
+        hairColors: ["white"],
+        eyeColors: [],
+        hairStyles: [],
+        genders: ["female"],
+        apparentAges: [],
+        clothing: [],
+        traits: [],
+      },
+      limit: 3,
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(new URL(String(fetcher.mock.calls[0]?.[0])).searchParams.get("search")).toBe("Frieren");
+    const query = new URL(String(fetcher.mock.calls[1]?.[0])).searchParams.get("query") ?? "";
+    expect(query).toContain("VALUES ?character { wd:Q104144455 }");
+    expect(query).toContain("wd:Q6933946");
+    expect(query).toContain("wd:Q6581072");
+  });
+
   it("rejects malformed QIDs without sending a request", async () => {
     const fetcher = vi.fn<typeof fetch>();
     const provider = new WikidataProvider({ fetcher });
@@ -119,6 +162,21 @@ describe("WikidataProvider", () => {
       { source: "wikidata", id: "Q1) SERVICE wikibase:label {" },
       "character",
     );
+
+    expect(result).toMatchObject({ status: "unsupported", items: [] });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed Wikidata work constraint before building SPARQL", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const provider = new WikidataProvider({ fetcher });
+
+    const result = await provider.searchCharacters({
+      entityType: "character",
+      text: "",
+      work: { source: "wikidata", id: "Q1. } SERVICE wikibase:label {" },
+      limit: 3,
+    });
 
     expect(result).toMatchObject({ status: "unsupported", items: [] });
     expect(fetcher).not.toHaveBeenCalled();

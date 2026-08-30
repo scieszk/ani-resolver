@@ -58,22 +58,38 @@ class CommandBuilderTests(unittest.TestCase):
             )
 
     def test_character_work_id_is_validated(self):
-        args = self.runner.build_resolve_args(
-            "character",
-            "白发 双马尾",
+        args = self.runner.build_resolve_character_args(
+            name="艾拉",
             top=5,
             providers="bangumi-archive",
             work="bangumi:400602",
+            hair_colors="white,silver",
+            hair_styles="twintails",
+            genders="female",
+            traits="expressionless",
         )
         self.assertIn("bangumi:400602", args)
+        self.assertIn("--name", args)
+        self.assertIn("--hair-color", args)
+        self.assertIn("white,silver", args)
+        self.assertNotIn("白发 双马尾", args)
 
         with self.assertRaisesRegex(ValueError, "external ID"):
-            self.runner.build_resolve_args(
-                "character",
-                "白发 双马尾",
+            self.runner.build_resolve_character_args(
+                name="艾拉",
                 top=5,
                 providers="bangumi-archive",
                 work="bangumi:400602;id",
+            )
+
+    def test_character_builder_requires_a_structured_condition(self):
+        with self.assertRaisesRegex(ValueError, "name, work, or appearance"):
+            self.runner.build_resolve_character_args(providers="wikidata")
+
+        with self.assertRaisesRegex(ValueError, "tag"):
+            self.runner.build_resolve_character_args(
+                providers="wikidata",
+                hair_colors="white;touch-/tmp/x",
             )
 
     def test_anilist_and_wikidata_ids_are_validated(self):
@@ -253,6 +269,29 @@ class PluginContractTests(unittest.TestCase):
             first_default_index = len(tool.args.args) - len(tool.args.defaults)
             self.assertLess(providers_index, first_default_index)
             self.assertNotIn("留空使用全部", ast.get_docstring(tool) or "")
+
+    def test_character_tool_exposes_structured_fields(self):
+        tree = ast.parse(MAIN_PATH.read_text(encoding="utf-8"))
+        tool = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "resolve_character"
+        )
+        parameters = {arg.arg for arg in tool.args.args}
+        self.assertTrue(
+            {
+                "name",
+                "work",
+                "hair_colors",
+                "eye_colors",
+                "hair_styles",
+                "genders",
+                "apparent_ages",
+                "clothing",
+                "traits",
+            }.issubset(parameters)
+        )
+        self.assertNotIn("input", parameters)
 
     def test_skill_routes_to_native_astrbot_tools(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")

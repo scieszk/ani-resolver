@@ -38,9 +38,10 @@ ani-resolver provider init trace-moe --api-key <optional-api-key> --json
 ani-resolver provider init bangumi-archive --archive <dump.zip> --json
 ani-resolver parse <text-or-path-or-magnet> --json
 ani-resolver resolve work <input> --top 5 --providers bangumi,tmdb --json
-ani-resolver resolve character <input> --top 5 --providers wikidata,anilist,bangumi --json
-ani-resolver resolve character <clue> --work bangumi:400602 --providers bangumi --top 5 --json
-ani-resolver resolve character "white hair twintails" --providers wikidata --top 5 --json
+ani-resolver resolve character --name <literal-name> --top 5 --providers wikidata,anilist,bangumi --json
+ani-resolver resolve character --name <literal-name> --work bangumi:400602 --providers bangumi --top 5 --json
+ani-resolver resolve character --hair-color white --hair-style twintails --gender female --trait expressionless --providers wikidata,bangumi-archive --top 5 --json
+ani-resolver resolve character --input-json <request.json> --json
 ani-resolver resolve image <frame.jpg> --providers trace-moe --top 5 --json
 ani-resolver resolve image <artwork-url> --providers saucenao --top 5 --json
 ani-resolver resolve image <character.png> --providers animetrace --top 5 --json
@@ -61,11 +62,14 @@ Bangumi API and Bangumi Archive share the `bangumi:<id>` namespace. Use `--provi
 
 Every resolve command requires `--providers`. Pass comma-separated provider IDs, or pass `all` by itself to query every loaded provider compatible with that operation. A missing selection, `all` mixed with IDs, an unknown provider, or a provider lacking the requested capability returns a structured error before upstream requests begin.
 
+Character input is structured. `--name` is literal, each appearance option is repeatable or comma-separated, and `--input-json -` reads a complete request from stdin. The CLI does not infer appearance tags from prose; an AI workflow may extract explicit user details into the structured fields before invoking it.
+
 ## Resolve Output
 
 - `query`: parsed input evidence and entity type.
 - `query.fileCount`, `query.files`, and `query.filesTruncated`: compact file evidence; add `--full-files` when every path is required.
 - `query.work`: the preserved work constraint for character resolution, when supplied.
+- `query.appearance`: normalized structured character conditions, when supplied.
 - `candidates`: ranked normalized identities.
 - `candidates[].score`: deterministic, uncalibrated match score.
 - `candidates[].externalIds`: sourced identifiers, including TMDB when available.

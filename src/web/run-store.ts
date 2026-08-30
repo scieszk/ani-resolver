@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+import type { CharacterAppearance, ExternalId } from "../types.js";
 import type { AttachmentKind, ResolvedRunTarget, RunTarget } from "./target.js";
 
 const DEFAULT_MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
@@ -30,9 +31,27 @@ export interface RunRecord {
   resolvedTarget: ResolvedRunTarget;
   status: RunStatus;
   providers: string[];
+  query?: StoredRunQuery;
   result?: unknown;
   error?: string;
   attachments: StoredAttachment[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoredRunQuery {
+  appearance?: CharacterAppearance;
+  work?: ExternalId;
+}
+
+export interface FavoriteRecord {
+  id: string;
+  entityKey: string;
+  entityType: string;
+  title: string;
+  image?: string;
+  candidate: unknown;
+  sourceRunId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +67,23 @@ export interface CreateRunInput {
   requestedTarget: RunTarget;
   resolvedTarget: ResolvedRunTarget;
   providers: string[];
+  query?: StoredRunQuery;
+}
+
+export interface SaveFavoriteInput {
+  entityKey: string;
+  entityType: string;
+  title: string;
+  image?: string;
+  candidate: unknown;
+  sourceRunId?: string;
+}
+
+export interface FavoriteListOptions {
+  query?: string;
+  entityType?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface AddAttachmentInput {
@@ -84,8 +120,21 @@ interface RunRow {
   resolved_target: ResolvedRunTarget;
   status: RunStatus;
   providers_json: string;
+  query_json: string | null;
   result_json: string | null;
   error: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+interface FavoriteRow {
+  id: string;
+  entity_key: string;
+  entity_type: string;
+  title: string;
+  image: string | null;
+  candidate_json: string;
+  source_run_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -130,6 +179,7 @@ export class RunStore {
         resolved_target TEXT NOT NULL,
         status TEXT NOT NULL,
         providers_json TEXT NOT NULL,
+        query_json TEXT,
         result_json TEXT,
         error TEXT,
         created_at INTEGER NOT NULL,
@@ -148,7 +198,24 @@ export class RunStore {
       );
       CREATE INDEX IF NOT EXISTS runs_created_at ON runs(created_at DESC);
       CREATE INDEX IF NOT EXISTS attachments_created_at ON attachments(created_at ASC);
+      CREATE TABLE IF NOT EXISTS favorites (
+        id TEXT PRIMARY KEY,
+        entity_key TEXT NOT NULL UNIQUE,
+        entity_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        image TEXT,
+        candidate_json TEXT NOT NULL,
+        source_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS favorites_created_at ON favorites(created_at DESC);
+      CREATE INDEX IF NOT EXISTS favorites_entity_type ON favorites(entity_type);
     `);
+    const runColumns = database.prepare("PRAGMA table_info(runs)").all() as unknown as Array<{ name: string }>;
+    if (!runColumns.some((column) => column.name === "query_json")) {
+      database.exec("ALTER TABLE runs ADD COLUMN query_json TEXT");
+    }
     this.database = database;
   }
 
@@ -165,8 +232,8 @@ export class RunStore {
       .prepare(
         `INSERT INTO runs(
           id, input, requested_target, resolved_target, status, providers_json,
-          result_json, error, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'pending', ?, NULL, NULL, ?, ?)`,
+          query_json, result_json, error, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, ?, ?)`,
       )
       .run(
         id,
@@ -174,6 +241,7 @@ export class RunStore {
         input.requestedTarget,
         input.resolvedTarget,
         JSON.stringify(input.providers),
+        input.query ? JSON.stringify(input.query) : null,
         now,
         now,
       );
@@ -250,8 +318,8 @@ export class RunStore {
     const limit = clampInteger(options.limit ?? 50, 1, 100);
     const offset = Math.max(0, Math.trunc(options.offset ?? 0));
     const query = options.query?.trim();
-    const where = query ? "WHERE input LIKE ? OR result_json LIKE ?" : "";
-    const parameters = query ? [`%${query}%`, `%${query}%`] : [];
+    const where = query ? "WHERE input LIKE ? OR query_json LIKE ? OR result_json LIKE ?" : "";
+    const parameters = query ? [`%${query}%`, `%${query}%`, `%${query}%`] : [];
     const rows = database
       .prepare(`SELECT * FROM runs ${where} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`)
       .all(...parameters, limit, offset) as unknown as RunRow[];
@@ -282,6 +350,81 @@ export class RunStore {
       rows.map((row) => rm(path.join(this.filesDirectory, row.stored_name!), { force: true })),
     );
     return true;
+  }
+
+  async saveFavorite(input: SaveFavoriteInput): Promise<FavoriteRecord> {
+    const database = this.getDatabase();
+    if (input.sourceRunId && !(await this.getRun(input.sourceRunId))) {
+      throw new Error(`Run not found: ${input.sourceRunId}`);
+    }
+    const existing = database
+      .prepare("SELECT id, created_at FROM favorites WHERE entity_key = ?")
+      .get(input.entityKey) as { id: string; created_at: number } | undefined;
+    const id = existing?.id ?? randomUUID();
+    const now = Date.now();
+    database.prepare(
+      `INSERT INTO favorites(
+        id, entity_key, entity_type, title, image, candidate_json,
+        source_run_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(entity_key) DO UPDATE SET
+        entity_type = excluded.entity_type,
+        title = excluded.title,
+        image = COALESCE(excluded.image, favorites.image),
+        candidate_json = excluded.candidate_json,
+        source_run_id = excluded.source_run_id,
+        updated_at = excluded.updated_at`,
+    ).run(
+      id,
+      input.entityKey,
+      input.entityType,
+      input.title,
+      input.image ?? null,
+      JSON.stringify(input.candidate),
+      input.sourceRunId ?? null,
+      existing?.created_at ?? now,
+      now,
+    );
+    return (await this.getFavorite(id))!;
+  }
+
+  async getFavorite(id: string): Promise<FavoriteRecord | null> {
+    const row = this.getDatabase()
+      .prepare("SELECT * FROM favorites WHERE id = ?")
+      .get(id) as FavoriteRow | undefined;
+    return row ? this.hydrateFavorite(row) : null;
+  }
+
+  async listFavorites(
+    options: FavoriteListOptions = {},
+  ): Promise<{ items: FavoriteRecord[]; total: number }> {
+    const database = this.getDatabase();
+    const limit = clampInteger(options.limit ?? 100, 1, 200);
+    const offset = Math.max(0, Math.trunc(options.offset ?? 0));
+    const clauses: string[] = [];
+    const parameters: Array<string | number> = [];
+    const query = options.query?.trim();
+    if (query) {
+      clauses.push("(title LIKE ? OR entity_key LIKE ? OR candidate_json LIKE ?)");
+      parameters.push(`%${query}%`, `%${query}%`, `%${query}%`);
+    }
+    if (options.entityType?.trim()) {
+      clauses.push("entity_type = ?");
+      parameters.push(options.entityType.trim());
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = database
+      .prepare(`SELECT * FROM favorites ${where} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`)
+      .all(...parameters, limit, offset) as unknown as FavoriteRow[];
+    const count = database
+      .prepare(`SELECT COUNT(*) AS count FROM favorites ${where}`)
+      .get(...parameters) as { count: number };
+    return { items: rows.map((row) => this.hydrateFavorite(row)), total: Number(count.count) };
+  }
+
+  async deleteFavorite(id: string): Promise<boolean> {
+    const result = this.getDatabase().prepare("DELETE FROM favorites WHERE id = ?").run(id);
+    return Number(result.changes) > 0;
   }
 
   async storageStats(): Promise<StorageStats> {
@@ -353,9 +496,24 @@ export class RunStore {
       resolvedTarget: row.resolved_target,
       status: row.status,
       providers: parseJson<string[]>(row.providers_json, []),
+      ...(row.query_json ? { query: parseJson<StoredRunQuery>(row.query_json, {}) } : {}),
       ...(row.result_json ? { result: parseJson<unknown>(row.result_json, null) } : {}),
       ...(row.error ? { error: row.error } : {}),
       attachments: attachments.map((attachment) => this.hydrateAttachment(attachment)),
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  }
+
+  private hydrateFavorite(row: FavoriteRow): FavoriteRecord {
+    return {
+      id: row.id,
+      entityKey: row.entity_key,
+      entityType: row.entity_type,
+      title: row.title,
+      ...(row.image ? { image: row.image } : {}),
+      candidate: parseJson<unknown>(row.candidate_json, null),
+      ...(row.source_run_id ? { sourceRunId: row.source_run_id } : {}),
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
     };

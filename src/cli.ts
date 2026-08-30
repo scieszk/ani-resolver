@@ -1,22 +1,31 @@
 #!/usr/bin/env node
 
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 
 import { ImageResolver } from "./image-resolver.js";
+import { normalizeAppearance, parseAppearanceInput } from "./appearance.js";
 import { parseContentInput } from "./input.js";
 import { ProviderSelectionError } from "./provider-selection.js";
 import { ProviderManager } from "./provider-management.js";
 import { Resolver } from "./resolver.js";
-import type { EntityType, ExternalId, Provider, ResolveResult } from "./types.js";
+import type {
+  CharacterAppearance,
+  EntityType,
+  ExternalId,
+  Provider,
+  ResolveResult,
+} from "./types.js";
 
 export interface CliOptions {
   providers?: Provider[];
   providerManager?: ProviderManager;
   stdout?: NodeJS.WritableStream;
   stderr?: NodeJS.WritableStream;
+  stdin?: NodeJS.ReadableStream;
   startWebServer?: (options: WebCliOptions) => Promise<void>;
 }
 
@@ -27,9 +36,30 @@ export interface WebCliOptions {
   stdout: NodeJS.WritableStream;
 }
 
+interface CharacterFlagOptions {
+  name?: string;
+  inputJson?: string;
+  hairColor?: string[];
+  eyeColor?: string[];
+  hairStyle?: string[];
+  gender?: string[];
+  apparentAge?: string[];
+  clothing?: string[];
+  trait?: string[];
+}
+
+interface CharacterJsonInput {
+  name?: string;
+  providers?: string[];
+  top?: number;
+  work?: ExternalId;
+  appearance?: Partial<CharacterAppearance>;
+}
+
 export function createCli(options: CliOptions = {}): Command {
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
+  const stdin = options.stdin ?? process.stdin;
   const providerManager = options.providerManager ?? new ProviderManager();
   let hostPromise: ReturnType<ProviderManager["loadProviderHost"]> | undefined;
   const loadProviders = async (): Promise<Provider[]> => {
@@ -64,7 +94,7 @@ export function createCli(options: CliOptions = {}): Command {
 
   const resolve = program.command("resolve").description("Return ranked metadata candidates");
   type ResolveCommandOptions = {
-    top: number;
+    top?: number;
     providers?: string[];
     work?: ExternalId;
     fullFiles?: boolean;
@@ -73,14 +103,16 @@ export function createCli(options: CliOptions = {}): Command {
     entityType: EntityType,
     input: string,
     commandOptions: ResolveCommandOptions,
+    appearance?: Partial<CharacterAppearance>,
   ) => {
     const resolver = await loadResolver();
     const result = await resolver.resolve({
       entityType,
       input,
-      limit: commandOptions.top,
+      limit: commandOptions.top ?? 5,
       providers: commandOptions.providers ?? [],
       ...(commandOptions.work ? { work: commandOptions.work } : {}),
+      ...(appearance ? { appearance } : {}),
     });
     writeJson(stdout, commandOptions.fullFiles ? result : compactResolveResult(result));
   };
@@ -97,16 +129,58 @@ export function createCli(options: CliOptions = {}): Command {
     );
   resolve
     .command("character")
-    .description("Resolve an anime character from a name or descriptive clues")
-    .argument("<input>")
-    .option("--top <number>", "Maximum candidates", parsePositiveInteger, 5)
+    .description("Resolve an anime character from a name and structured conditions")
+    .argument("[input]", "Literal character name (kept for CLI compatibility)")
+    .option("--name <name>", "Literal character name")
+    .option("--top <number>", "Maximum candidates", parsePositiveInteger)
     .option("--providers <ids>", "Comma-separated provider IDs or all (required)", parseList)
     .option("--work <external-id>", "Known work ID used as a character constraint", parseExternalId)
+    .option("--hair-color <value>", "Hair color tag; repeatable or comma-separated", collectValues)
+    .option("--eye-color <value>", "Eye color tag; repeatable or comma-separated", collectValues)
+    .option("--hair-style <value>", "Hair style tag; repeatable or comma-separated", collectValues)
+    .option("--gender <value>", "Gender tag; repeatable or comma-separated", collectValues)
+    .option("--apparent-age <value>", "Apparent age tag; repeatable or comma-separated", collectValues)
+    .option("--clothing <value>", "Clothing tag; repeatable or comma-separated", collectValues)
+    .option("--trait <value>", "Trait tag; repeatable or comma-separated", collectValues)
+    .option("--input-json <path>", "Read a structured request from a JSON file or - for stdin")
     .option("--json", "Emit JSON")
     .option("--full-files", "Include every parsed file path")
-    .action((input: string, commandOptions: ResolveCommandOptions) =>
-      runResolve("character", input, commandOptions),
-    );
+    .action(async (
+      input: string | undefined,
+      commandOptions: ResolveCommandOptions & CharacterFlagOptions,
+    ) => {
+      const json = commandOptions.inputJson
+        ? await readCharacterJson(commandOptions.inputJson, stdin)
+        : {};
+      if (input && commandOptions.name) {
+        throw new Error("Pass the character name either positionally or with --name, not both");
+      }
+      const flagAppearance: Partial<CharacterAppearance> = {
+        ...(commandOptions.hairColor ? { hairColors: commandOptions.hairColor } : {}),
+        ...(commandOptions.eyeColor ? { eyeColors: commandOptions.eyeColor } : {}),
+        ...(commandOptions.hairStyle ? { hairStyles: commandOptions.hairStyle } : {}),
+        ...(commandOptions.gender ? { genders: commandOptions.gender } : {}),
+        ...(commandOptions.apparentAge ? { apparentAges: commandOptions.apparentAge } : {}),
+        ...(commandOptions.clothing ? { clothing: commandOptions.clothing } : {}),
+        ...(commandOptions.trait ? { traits: commandOptions.trait } : {}),
+      };
+      const appearance = mergeAppearance(json.appearance, flagAppearance);
+      await runResolve(
+        "character",
+        commandOptions.name ?? input ?? json.name ?? "",
+        {
+          ...commandOptions,
+          top: commandOptions.top ?? json.top ?? 5,
+          ...((commandOptions.providers ?? json.providers)
+            ? { providers: commandOptions.providers ?? json.providers }
+            : {}),
+          ...((commandOptions.work ?? json.work)
+            ? { work: commandOptions.work ?? json.work }
+            : {}),
+        },
+        appearance,
+      );
+    });
   resolve
     .command("image")
     .description("Identify an anime scene, image source, or character from an image")
@@ -293,6 +367,100 @@ function parseStorageMb(value: string): number {
 
 function parseList(value: string): string[] {
   return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
+}
+
+function collectValues(value: string, previous: string[] = []): string[] {
+  return [...new Set([...previous, ...parseList(value)])];
+}
+
+function mergeAppearance(
+  base: Partial<CharacterAppearance> | undefined,
+  additions: Partial<CharacterAppearance>,
+): CharacterAppearance {
+  const normalized = normalizeAppearance(base);
+  for (const field of Object.keys(normalized) as Array<keyof CharacterAppearance>) {
+    normalized[field] = [
+      ...new Set([...normalized[field], ...(additions[field] ?? [])]),
+    ];
+  }
+  return normalized;
+}
+
+async function readCharacterJson(
+  source: string,
+  stdin: NodeJS.ReadableStream,
+): Promise<CharacterJsonInput> {
+  const raw = source === "-"
+    ? await readStream(stdin)
+    : await readFile(path.resolve(source), "utf8");
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error(`Invalid character query JSON from ${source}`);
+  }
+  if (!isRecord(value)) throw new Error("Character query JSON must be an object");
+  const top = value.top === undefined ? undefined : Number(value.top);
+  if (top !== undefined && (!Number.isInteger(top) || top < 1 || top > 50)) {
+    throw new Error("Character query JSON top must be an integer between 1 and 50");
+  }
+  const providers = value.providers === undefined
+    ? undefined
+    : Array.isArray(value.providers)
+      ? value.providers.filter((item): item is string => typeof item === "string")
+      : typeof value.providers === "string"
+        ? parseList(value.providers)
+        : undefined;
+  if (value.providers !== undefined && !providers) {
+    throw new Error("Character query JSON providers must be a string or string array");
+  }
+  const work = parseJsonExternalId(value.work);
+  const appearance = value.appearance === undefined
+    ? undefined
+    : parseAppearanceInput(value.appearance);
+  return {
+    ...(typeof value.name === "string" && value.name.trim() ? { name: value.name.trim() } : {}),
+    ...(providers ? { providers } : {}),
+    ...(top !== undefined ? { top } : {}),
+    ...(work ? { work } : {}),
+    ...(appearance ? { appearance } : {}),
+  };
+}
+
+function parseJsonExternalId(value: unknown): ExternalId | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "string") return parseExternalId(value);
+  if (
+    !isRecord(value) ||
+    typeof value.source !== "string" ||
+    typeof value.id !== "string"
+  ) {
+    throw new Error("Character query JSON work must use source:id or an external ID object");
+  }
+  const mediaKind = typeof value.mediaKind === "string" && isMediaKind(value.mediaKind)
+    ? value.mediaKind
+    : undefined;
+  return {
+    source: value.source,
+    id: value.id,
+    ...(mediaKind ? { mediaKind } : {}),
+  };
+}
+
+function isMediaKind(value: string): value is NonNullable<ExternalId["mediaKind"]> {
+  return value === "tv" || value === "movie" || value === "ova" || value === "web" || value === "unknown";
+}
+
+async function readStream(stream: NodeJS.ReadableStream): Promise<string> {
+  let value = "";
+  for await (const chunk of stream as NodeJS.ReadableStream & AsyncIterable<Buffer | string>) {
+    value += chunk.toString();
+  }
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function parseEntityType(value: string): EntityType {

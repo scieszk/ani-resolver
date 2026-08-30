@@ -32,5 +32,5 @@ export function selectResolutionInput(options: TargetInput & { target: ResolvedR
     if (attachment) return attachment.path;
   }
   if (options.input.trim()) return options.input.trim();
-  return options.attachments[0]?.path ?? "";
+  return "";
 }

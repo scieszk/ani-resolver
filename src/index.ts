@@ -1,10 +1,15 @@
 export { parseContentInput } from "./input.js";
 export {
+  CHARACTER_APPEARANCE_OPTIONS,
   emptyAppearance,
+  expandAppearanceValues,
   hasAppearanceFacts,
+  normalizeAppearance,
+  parseAppearanceInput,
   parseAppearanceText,
   scoreAppearanceMatch,
 } from "./appearance.js";
+export type { AppearanceField } from "./appearance.js";
 export { KeyringCredentialStore } from "./credentials.js";
 export { parseImageInput, publicImageEvidence } from "./image-input.js";
 export { ImageResolver } from "./image-resolver.js";

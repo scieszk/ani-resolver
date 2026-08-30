@@ -23,6 +23,7 @@ describe("web result model", () => {
     });
 
     expect(items[0]).toMatchObject({
+      key: "work:tmdb:123",
       entityType: "work",
       title: "Dungeon Meshi",
       confidence: 0.93,
@@ -77,7 +78,7 @@ describe("web result model", () => {
   it("summarizes a history run as input to top output", () => {
     const summary = summarizeRun(fixtureRun());
     expect(summary).toMatchObject({
-      input: "白发双马尾，前期没什么表情",
+      input: "Isla · White · Twintails · Expressionless",
       output: "Isla",
       confidence: 0.91,
       entityType: "character",
@@ -88,11 +89,17 @@ describe("web result model", () => {
 function fixtureRun(): WebRun {
   return {
     id: "run-1",
-    input: "白发双马尾，前期没什么表情",
-    requestedTarget: "auto",
+    input: "Isla",
+    requestedTarget: "character",
     resolvedTarget: "character",
     status: "completed",
     providers: ["all"],
+    query: {
+      appearance: {
+        hairColors: ["white"], eyeColors: [], hairStyles: ["twintails"],
+        genders: [], apparentAges: [], clothing: [], traits: ["expressionless"],
+      },
+    },
     attachments: [],
     createdAt: "2026-08-30T01:00:00.000Z",
     updatedAt: "2026-08-30T01:00:01.000Z",
@@ -100,6 +107,7 @@ function fixtureRun(): WebRun {
       schemaVersion: "ani-resolver.resolve.v1",
       candidates: [
         {
+          key: "character:anilist:unknown:88753",
           entityType: "character",
           names: ["Isla"],
           score: 0.91,

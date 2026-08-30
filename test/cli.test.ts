@@ -1,4 +1,4 @@
-import { Writable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
@@ -192,6 +192,9 @@ describe("CLI", () => {
     expect(work.helpInformation()).toContain("required");
     expect(work.helpInformation()).not.toContain("--work <external-id>");
     expect(character.helpInformation()).toContain("--work <external-id>");
+    expect(character.helpInformation()).toContain("--hair-color <value>");
+    expect(character.helpInformation()).toContain("--input-json <path>");
+    expect(character.description()).not.toContain("descriptive clues");
     expect(image.helpInformation()).toMatch(/selected providers receive\s+image data/);
     expect(providerList.description()).toContain("capabilities");
     expect(providerInstall.description()).toContain("provider package");
@@ -199,6 +202,96 @@ describe("CLI", () => {
     expect(web.description()).toContain("browser");
     expect(web.helpInformation()).toContain("--host <host>");
     expect(web.helpInformation()).toContain("0.0.0.0");
+  });
+
+  it("builds a character query from explicit repeated appearance flags", async () => {
+    const searchCharacters = vi.fn(async (_query: ResolveQuery) => ({
+      provider: "fixture",
+      status: "empty" as const,
+      items: [],
+    }));
+    const provider: Provider = {
+      manifest: {
+        ...new CliProvider().manifest,
+        capabilities: ["character_search", "character_appearance_search"],
+      },
+      searchCharacters,
+    };
+    const stdout = new MemoryStream();
+    const cli = createCli({ providers: [provider], stdout, stderr: new MemoryStream() });
+
+    await cli.parseAsync([
+      "resolve", "character", "--providers", "fixture",
+      "--hair-color", "white", "--hair-color", "silver",
+      "--hair-style", "twintails", "--gender", "female", "--json",
+    ], { from: "user" });
+
+    expect(searchCharacters).toHaveBeenCalledWith(expect.objectContaining({
+      text: "",
+      appearance: {
+        hairColors: ["white", "silver"],
+        eyeColors: [],
+        hairStyles: ["twintails"],
+        genders: ["female"],
+        apparentAges: [],
+        clothing: [],
+        traits: [],
+      },
+    }));
+    expect(JSON.parse(stdout.value).query.appearance.hairStyles).toEqual(["twintails"]);
+  });
+
+  it("reads a complete structured character request from JSON stdin", async () => {
+    const searchCharacters = vi.fn(async (_query: ResolveQuery) => ({
+      provider: "fixture",
+      status: "empty" as const,
+      items: [],
+    }));
+    const provider: Provider = {
+      manifest: {
+        ...new CliProvider().manifest,
+        capabilities: ["character_search", "character_appearance_search"],
+      },
+      searchCharacters,
+    };
+    const stdout = new MemoryStream();
+    const stdin = Readable.from([JSON.stringify({
+      name: "Isla",
+      providers: ["fixture"],
+      top: 3,
+      work: "anilist:20931",
+      appearance: { traits: ["expressionless"] },
+    })]);
+    const cli = createCli({ providers: [provider], stdin, stdout, stderr: new MemoryStream() });
+
+    await cli.parseAsync(["resolve", "character", "--input-json", "-", "--json"], { from: "user" });
+
+    expect(searchCharacters).toHaveBeenCalledWith(expect.objectContaining({
+      text: "Isla",
+      work: { source: "anilist", id: "20931" },
+      limit: 3,
+      appearance: expect.objectContaining({ traits: ["expressionless"] }),
+    }));
+  });
+
+  it("rejects malformed appearance arrays in character JSON", async () => {
+    const stderr = new MemoryStream();
+    const exitCode = await runCli(
+      ["node", "ani-resolver", "resolve", "character", "--input-json", "-", "--json"],
+      {
+        providers: [new CliProvider()],
+        stdin: Readable.from([JSON.stringify({
+          name: "Isla",
+          providers: ["fixture"],
+          appearance: { hairColors: "white" },
+        })]),
+        stdout: new MemoryStream(),
+        stderr,
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stderr.value).error.message).toContain("appearance.hairColors");
   });
 
   it("starts the browser UI with LAN-safe options and no access token", async () => {

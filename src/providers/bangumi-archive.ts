@@ -7,6 +7,8 @@ import type { Readable } from "node:stream";
 import { open as openZip, type Entry, type ZipFile } from "yauzl";
 
 import {
+  emptyAppearance,
+  expandAppearanceValues,
   hasAppearanceFacts,
   parseAppearanceText,
   scoreAppearanceMatch,
@@ -162,6 +164,9 @@ export async function buildBangumiArchiveIndex(
     const insertCharacterFts = database.prepare(
       "INSERT INTO character_fts(rowid, names, text) VALUES (?, ?, ?)",
     );
+    const insertCharacterAppearance = database.prepare(
+      "INSERT OR IGNORE INTO character_appearance(character_id, field, value) VALUES (?, ?, ?)",
+    );
     database.exec("BEGIN");
     try {
       for await (const item of readJsonLines(archive, "character.jsonlines")) {
@@ -178,6 +183,10 @@ export async function buildBangumiArchiveIndex(
         };
         insertCharacter.run(id, JSON.stringify(names), JSON.stringify(facts));
         insertCharacterFts.run(id, names.join("\n"), searchableText(item, names));
+        const appearance = parseAppearanceText(JSON.stringify(facts));
+        for (const [field, values] of Object.entries(appearance)) {
+          for (const value of values) insertCharacterAppearance.run(id, field, value);
+        }
         characters += 1;
       }
       database.exec("COMMIT");
@@ -241,9 +250,30 @@ export class BangumiArchiveProvider implements Provider {
     }
     const database = this.open();
     try {
-      const rows = query.work
-        ? workCharacterRows(database, query.work.id)
-        : searchCharacters(database, query.text, Math.max(query.limit * 4, 20), undefined);
+      const requestedAppearance = query.appearance ?? emptyAppearance();
+      let rows: CharacterRow[];
+      if (query.work) {
+        rows = workCharacterRows(database, query.work.id);
+      } else if (query.text.trim()) {
+        rows = searchCharacters(database, query.text, Math.max(query.limit * 4, 20), undefined);
+      } else if (hasAppearanceFacts(requestedAppearance)) {
+        if (!hasTable(database, "character_appearance")) {
+          return {
+            provider: this.manifest.id,
+            status: "unsupported",
+            items: [],
+            message:
+              "Bangumi Archive index predates structured appearance search; rerun provider init bangumi-archive with the source dump",
+          };
+        }
+        rows = searchCharactersByAppearance(
+          database,
+          requestedAppearance,
+          Math.max(query.limit * 4, 20),
+        );
+      } else {
+        rows = [];
+      }
       const items = rows
         .map((row, index) => characterCandidate(row, index, query))
         .sort((left, right) => right.providerScore - left.providerScore)
@@ -310,6 +340,14 @@ export class BangumiArchiveProvider implements Provider {
   }
 }
 
+function hasTable(database: DatabaseSync, name: string): boolean {
+  return Boolean(
+    database
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(name),
+  );
+}
+
 function createSchema(database: DatabaseSync): void {
   database.exec(`
     PRAGMA journal_mode = OFF;
@@ -330,6 +368,14 @@ function createSchema(database: DatabaseSync): void {
       facts_json TEXT NOT NULL
     );
     CREATE VIRTUAL TABLE character_fts USING fts5(names, text, tokenize='trigram');
+    CREATE TABLE character_appearance (
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      field TEXT NOT NULL,
+      value TEXT NOT NULL,
+      PRIMARY KEY (character_id, field, value)
+    );
+    CREATE INDEX character_appearance_lookup
+      ON character_appearance(field, value, character_id);
     CREATE TABLE subject_characters (
       subject_id INTEGER NOT NULL,
       character_id INTEGER NOT NULL,
@@ -408,6 +454,33 @@ function searchCharacters(
     .all(...parameters) as unknown as CharacterRow[];
 }
 
+function searchCharactersByAppearance(
+  database: DatabaseSync,
+  appearance: import("../types.js").CharacterAppearance,
+  limit: number,
+): CharacterRow[] {
+  const groups = Object.entries(appearance)
+    .filter((entry): entry is [keyof typeof appearance, string[]] => entry[1].length > 0)
+    .map(([field, values]) => ({ field, values: expandAppearanceValues(field, values) }));
+  if (!groups.length) return [];
+  const conditions = groups.map(
+    ({ values }) => `(a.field = ? AND a.value IN (${values.map(() => "?").join(", ")}))`,
+  );
+  const parameters = groups.flatMap(({ field, values }) => [field, ...values]);
+  return database
+    .prepare(
+      `SELECT c.id, c.names_json, c.facts_json
+       FROM character_appearance a
+       JOIN characters c ON c.id = a.character_id
+       WHERE ${conditions.join(" OR ")}
+       GROUP BY c.id
+       HAVING COUNT(DISTINCT a.field) = ?
+       ORDER BY c.id
+       LIMIT ?`,
+    )
+    .all(...parameters, groups.length, limit) as unknown as CharacterRow[];
+}
+
 function subjectCandidate(row: SubjectRow, query: ResolveQuery, index: number): ProviderCandidate {
   const names = parseJson<string[]>(row.names_json, []);
   const normalizedQuery = normalizeName(query.title ?? query.text);
@@ -442,7 +515,7 @@ function characterCandidate(
   if (row.relation_type !== undefined && row.relation_type !== null) facts.relationType = row.relation_type;
   const appearance = parseAppearanceText(JSON.stringify(facts));
   facts.appearance = appearance;
-  const requestedAppearance = parseAppearanceText(query?.text ?? "");
+  const requestedAppearance = query?.appearance ?? emptyAppearance();
   const match = scoreAppearanceMatch(requestedAppearance, appearance);
   const base = Math.max(0.55, 0.88 - index * 0.035);
   return {
@@ -453,7 +526,8 @@ function characterCandidate(
     externalIds: [{ source: "bangumi", id: String(row.id) }],
     providerScore: Math.min(
       0.96,
-      base + (hasAppearanceFacts(requestedAppearance) ? match.score * 0.17 : 0),
+      base + characterNameBoost(query?.text ?? "", parseJson<string[]>(row.names_json, [])) +
+        (hasAppearanceFacts(requestedAppearance) ? match.score * 0.17 : 0),
     ),
     facts,
     evidence: [
@@ -465,6 +539,14 @@ function characterCandidate(
       },
     ],
   };
+}
+
+function characterNameBoost(text: string, names: string[]): number {
+  const query = normalizeName(text);
+  if (!query) return 0;
+  const normalizedNames = names.map(normalizeName);
+  if (normalizedNames.includes(query)) return 0.2;
+  return normalizedNames.some((name) => name.includes(query) || query.includes(name)) ? 0.1 : 0;
 }
 
 function workCharacterRows(database: DatabaseSync, workId: string): CharacterRow[] {

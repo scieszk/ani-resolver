@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  emptyAppearance,
   hasAppearanceFacts,
   parseAppearanceText,
   scoreAppearanceMatch,
@@ -195,6 +196,13 @@ export class AniListProvider implements Provider {
       };
     }
 
+    if (!query.text.trim()) {
+      return unsupported(
+        this.manifest.id,
+        "AniList appearance filtering requires a character name or an AniList work ID",
+      );
+    }
+
     const response = await this.graphql(CHARACTER_SEARCH, {
       search: query.text,
       perPage: bounded(query.limit, 25),
@@ -351,7 +359,7 @@ function characterCandidate(
   const appearance = parseAppearanceText(
     [description, character.gender ?? "", character.age ? `age ${character.age}` : ""].join("\n"),
   );
-  const requestedAppearance = parseAppearanceText(query.text);
+  const requestedAppearance = query.appearance ?? emptyAppearance();
   const match = scoreAppearanceMatch(requestedAppearance, appearance);
   const nameExact = names.some((name) => normalizeName(name) === normalizeName(query.text));
   const base = Math.max(0.5, 0.76 - Math.min(index, 10) * 0.02);
@@ -405,10 +413,14 @@ function rankCharacterCandidate(
       traits: z.array(z.string()),
     })
     .safeParse(appearance);
-  const requested = parseAppearanceText(query.text);
-  const match = scoreAppearanceMatch(requested, normalizedAppearance.success ? normalizedAppearance.data : parseAppearanceText(""));
+  const requested = query.appearance ?? emptyAppearance();
+  const match = scoreAppearanceMatch(requested, normalizedAppearance.success ? normalizedAppearance.data : emptyAppearance());
   const base = Math.max(0.5, 0.76 - Math.min(index, 10) * 0.02);
-  const score = Math.min(0.95, base + (hasAppearanceFacts(requested) ? match.score * 0.17 : 0));
+  const score = Math.min(
+    0.95,
+    base + characterNameBoost(query.text, candidate.names) +
+      (hasAppearanceFacts(requested) ? match.score * 0.17 : 0),
+  );
   return {
     ...candidate,
     providerScore: Number(score.toFixed(4)),
@@ -419,10 +431,20 @@ function rankCharacterCandidate(
   };
 }
 
+function characterNameBoost(text: string, names: string[]): number {
+  const query = normalizeName(text);
+  if (!query) return 0;
+  const normalizedNames = names.map(normalizeName);
+  if (normalizedNames.includes(query)) return 0.2;
+  return normalizedNames.some((name) => name.includes(query) || query.includes(name)) ? 0.1 : 0;
+}
+
 function plainText(value: string | null | undefined): string {
   return (value ?? "")
     .replace(/<br\s*\/?>/giu, "\n")
     .replace(/<[^>]+>/gu, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1")
+    .replace(/[*_`]/gu, "")
     .replace(/~!|!~/gu, "")
     .replace(/&amp;/gu, "&")
     .replace(/&lt;/gu, "<")

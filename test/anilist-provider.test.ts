@@ -13,7 +13,7 @@ const frieren = {
   id: 176754,
   name: { full: "Frieren", native: "フリーレン", alternative: ["芙莉莲"] },
   image: { large: "https://example.test/frieren.jpg" },
-  description: "A <b>white-haired</b> elf with twintails and an expressionless face who traveled with Hero Himmel.",
+  description: "A <b>white-haired</b> elf with twintails and an expressionless face who traveled with [Hero Himmel](https://anilist.co/character/184311/Himmel) in _Sousou no Frieren_.",
   gender: "Female",
   age: "1000+",
   bloodType: null,
@@ -90,7 +90,7 @@ describe("AniListProvider", () => {
       providerId: "176754",
       externalIds: [{ source: "anilist", id: "176754" }],
       facts: {
-        description: "A white-haired elf with twintails and an expressionless face who traveled with Hero Himmel.",
+        description: "A white-haired elf with twintails and an expressionless face who traveled with Hero Himmel in Sousou no Frieren.",
         appearance: expect.objectContaining({
           hairColors: ["white"],
           hairStyles: ["twintails"],
@@ -139,7 +139,16 @@ describe("AniListProvider", () => {
 
     const result = await provider.searchCharacters({
       entityType: "character",
-      text: "白发 双马尾 女 无表情",
+      text: "",
+      appearance: {
+        hairColors: ["white"],
+        eyeColors: [],
+        hairStyles: ["twintails"],
+        genders: ["female"],
+        apparentAges: [],
+        clothing: [],
+        traits: ["expressionless"],
+      },
       work: { source: "anilist", id: "154587" },
       limit: 2,
     });
@@ -152,5 +161,45 @@ describe("AniListProvider", () => {
     const body = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
     expect(body.variables).toMatchObject({ id: 154587 });
     expect(body.query).toContain("Media");
+  });
+
+  it("keeps a literal character name when a work constraint is present", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        data: {
+          Media: {
+            characters: {
+              edges: [
+                { role: "MAIN", node: frieren },
+                {
+                  role: "MAIN",
+                  node: {
+                    id: 183965,
+                    name: { full: "Fern", native: "フェルン", alternative: [] },
+                    image: { large: null },
+                    description: "A young woman with long purple hair.",
+                    gender: "Female",
+                    age: "18",
+                    bloodType: null,
+                    favourites: 30000,
+                    siteUrl: "https://anilist.co/character/183965",
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    const provider = new AniListProvider({ fetcher });
+
+    const result = await provider.searchCharacters({
+      entityType: "character",
+      text: "Fern",
+      work: { source: "anilist", id: "154587" },
+      limit: 2,
+    });
+
+    expect(result.items.map((item) => item.providerId)).toEqual(["183965", "176754"]);
   });
 });

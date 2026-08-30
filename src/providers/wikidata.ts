@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  emptyAppearance,
   hasAppearanceFacts,
   parseAppearanceText,
   scoreAppearanceMatch,
@@ -122,13 +123,23 @@ export class WikidataProvider implements Provider {
   }
 
   async searchCharacters(query: ResolveQuery): Promise<ProviderRun<ProviderCandidate>> {
-    if (query.work && query.work.source !== "wikidata") {
-      return unsupported(this.manifest.id, "Wikidata work filtering requires a Wikidata QID");
+    if (query.work && (query.work.source !== "wikidata" || !QID.test(query.work.id))) {
+      return unsupported(this.manifest.id, "Wikidata work filtering requires a valid Wikidata QID");
     }
-    const appearance = parseAppearanceText(query.text);
-    const selector = appearanceSelector(appearance, query.work);
-    if (selector) {
-      return this.runSparql(detailQuery(selector, Math.max(query.limit * 4, 20)), appearance, query.limit);
+    const appearance = query.appearance ?? emptyAppearance();
+    const structuredSelector = appearanceSelector(appearance, query.work);
+    if (!query.text.trim()) {
+      if (!structuredSelector) {
+        return unsupported(
+          this.manifest.id,
+          "Wikidata global appearance search requires a supported hair, eye, hairstyle, gender, or work condition",
+        );
+      }
+      return this.runSparql(
+        detailQuery(structuredSelector, Math.max(query.limit * 4, 20)),
+        appearance,
+        query.limit,
+      );
     }
 
     const searched = await requestJson(
@@ -142,8 +153,12 @@ export class WikidataProvider implements Provider {
     if (!parsed.success) return invalidResponse(this.manifest.id, parsed.error.message);
     const ids = parsed.data.search.map((item) => item.id).filter((id) => QID.test(id));
     if (!ids.length) return run(this.manifest.id, []);
+    const selectors = [
+      `VALUES ?character { ${ids.map((id) => `wd:${id}`).join(" ")} }`,
+      structuredSelector,
+    ].filter((value): value is string => Boolean(value));
     return this.runSparql(
-      detailQuery(`VALUES ?character { ${ids.map((id) => `wd:${id}`).join(" ")} }`, ids.length),
+      detailQuery(selectors.join("\n"), ids.length),
       appearance,
       query.limit,
     );

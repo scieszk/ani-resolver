@@ -1,6 +1,6 @@
 import type { AppearanceMatch, CharacterAppearance } from "./types.js";
 
-type AppearanceField = keyof CharacterAppearance;
+export type AppearanceField = keyof CharacterAppearance;
 
 interface VocabularyEntry {
   value: string;
@@ -128,6 +128,62 @@ export function scoreAppearanceMatch(
 
 export function hasAppearanceFacts(value: CharacterAppearance): boolean {
   return appearanceFields().some((field) => value[field].length > 0);
+}
+
+export function normalizeAppearance(
+  value: Partial<CharacterAppearance> | undefined,
+): CharacterAppearance {
+  const normalized = emptyAppearance();
+  if (!value) return normalized;
+  for (const field of appearanceFields()) {
+    const items = value[field];
+    if (!Array.isArray(items)) continue;
+    normalized[field] = [...new Set(
+      items
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.normalize("NFKC").trim())
+        .filter(Boolean),
+    )];
+  }
+  return normalized;
+}
+
+export function parseAppearanceInput(
+  value: unknown,
+  label = "appearance",
+): CharacterAppearance {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  const fields = appearanceFields();
+  const unknown = Object.keys(record).find(
+    (field) => !fields.includes(field as AppearanceField),
+  );
+  if (unknown) throw new Error(`${label}.${unknown} is not a supported field`);
+  for (const field of fields) {
+    const items = record[field];
+    if (items === undefined) continue;
+    if (!Array.isArray(items) || items.some((item) => typeof item !== "string")) {
+      throw new Error(`${label}.${field} must be an array of strings`);
+    }
+  }
+  return normalizeAppearance(record as Partial<CharacterAppearance>);
+}
+
+export const CHARACTER_APPEARANCE_OPTIONS: Record<AppearanceField, readonly string[]> =
+  Object.fromEntries(
+    appearanceFields().map((field) => [field, VOCABULARY[field].map((item) => item.value)]),
+  ) as unknown as Record<AppearanceField, readonly string[]>;
+
+export function expandAppearanceValues(
+  field: AppearanceField,
+  values: string[],
+): string[] {
+  return [...new Set(values.flatMap((value) => [
+    value,
+    ...(COMPATIBLE.get(`${field}:${value}`) ?? []),
+  ]))];
 }
 
 export function emptyAppearance(): CharacterAppearance {

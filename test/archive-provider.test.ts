@@ -149,6 +149,21 @@ describe("BangumiArchiveProvider", () => {
     expect(characters.items[0]).toMatchObject({ providerId: "120910" });
   });
 
+  it("ranks a literal character name inside a known work", async () => {
+    const paths = await fixture();
+    await buildBangumiArchiveIndex(paths);
+    const provider = new BangumiArchiveProvider({ indexPath: paths.index });
+
+    const result = await provider.searchCharacters!({
+      entityType: "character",
+      text: "艾拉",
+      work: { source: "bangumi", id: "395378" },
+      limit: 3,
+    });
+
+    expect(result.items[0]).toMatchObject({ providerId: "130000" });
+  });
+
   it("searches two-character CJK clues in indexed full text", async () => {
     const paths = await fixture();
     await buildBangumiArchiveIndex(paths);
@@ -171,7 +186,16 @@ describe("BangumiArchiveProvider", () => {
 
     const result = await provider.searchCharacters!({
       entityType: "character",
-      text: "silver-haired twin tails expressionless female",
+      text: "",
+      appearance: {
+        hairColors: ["silver"],
+        eyeColors: [],
+        hairStyles: ["twintails"],
+        genders: ["female"],
+        apparentAges: [],
+        clothing: [],
+        traits: ["expressionless"],
+      },
       work: { source: "bangumi", id: "395378" },
       limit: 3,
     });
@@ -189,6 +213,61 @@ describe("BangumiArchiveProvider", () => {
       evidence: expect.arrayContaining([
         expect.objectContaining({ kind: "appearance_match", weight: 1 }),
       ]),
+    });
+  });
+
+  it("searches the archive globally from structured appearance conditions", async () => {
+    const paths = await fixture();
+    await buildBangumiArchiveIndex(paths);
+    const provider = new BangumiArchiveProvider({ indexPath: paths.index });
+
+    const result = await provider.searchCharacters!({
+      entityType: "character",
+      text: "",
+      appearance: {
+        hairColors: ["silver"],
+        eyeColors: [],
+        hairStyles: ["twintails"],
+        genders: ["female"],
+        apparentAges: [],
+        clothing: [],
+        traits: ["expressionless"],
+      },
+      limit: 3,
+    });
+
+    expect(result.status).toBe("ok");
+    expect(result.items[0]).toMatchObject({ providerId: "130000" });
+  });
+
+  it("asks for reinitialization when a legacy index lacks appearance data", async () => {
+    const paths = await fixture();
+    await buildBangumiArchiveIndex(paths);
+    const { DatabaseSync } = await import("node:sqlite");
+    const database = new DatabaseSync(paths.index);
+    database.exec("DROP TABLE character_appearance");
+    database.close();
+    const provider = new BangumiArchiveProvider({ indexPath: paths.index });
+
+    const result = await provider.searchCharacters!({
+      entityType: "character",
+      text: "",
+      appearance: {
+        hairColors: ["white"],
+        eyeColors: [],
+        hairStyles: [],
+        genders: [],
+        apparentAges: [],
+        clothing: [],
+        traits: [],
+      },
+      limit: 3,
+    });
+
+    expect(result).toMatchObject({
+      status: "unsupported",
+      items: [],
+      message: expect.stringContaining("provider init bangumi-archive"),
     });
   });
 });

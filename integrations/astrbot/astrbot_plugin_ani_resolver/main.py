@@ -10,6 +10,7 @@ from .runner import (
     build_entity_get_args,
     build_parse_args,
     build_provider_list_args,
+    build_resolve_character_args,
     build_resolve_args,
     build_resolve_image_args,
     build_work_characters_args,
@@ -21,7 +22,7 @@ from .runner import (
     "astrbot_plugin_ani_resolver",
     "scieszk",
     "为 AstrBot 提供动画作品、角色和外部 ID 的多源识别工具",
-    "0.3.0",
+    "0.4.0",
 )
 class AniResolverPlugin(Star):
     def __init__(self, context: Context):
@@ -86,26 +87,46 @@ class AniResolverPlugin(Star):
     async def resolve_character(
         self,
         event: AstrMessageEvent,
-        input: str,
         providers: str,
+        name: str = "",
         work: str = "",
         top: int = 5,
+        hair_colors: str = "",
+        eye_colors: str = "",
+        hair_styles: str = "",
+        genders: str = "",
+        apparent_ages: str = "",
+        clothing: str = "",
+        traits: str = "",
     ) -> str:
-        """根据角色名或外形特征返回多个角色候选；已知作品时应传入作品 ID 缩小范围。
+        """根据结构化角色名、作品和外形标签返回多个角色候选。
 
         Args:
-            input(string): 角色名或角色文字特征
+            providers(string): 必选的逗号分隔数据源 ID，或显式传入 all；应先调用数据源列表选择
+            name(string): 可选的字面角色名，不要放入描述句
             work(string): 可选作品 ID，例如 bangumi:400602、anilist:154587
             top(number): 返回候选数量，1 到 20，默认 5
-            providers(string): 必选的逗号分隔数据源 ID，或显式传入 all；应先调用数据源列表选择
+            hair_colors(string): 可选英文发色标签，多个值用逗号分隔，例如 white,silver
+            eye_colors(string): 可选英文瞳色标签，多个值用逗号分隔
+            hair_styles(string): 可选英文发型标签，例如 twintails,long_hair
+            genders(string): 可选英文性别标签，例如 female
+            apparent_ages(string): 可选英文外观年龄标签，例如 child,teen,adult
+            clothing(string): 可选英文服装标签，例如 school_uniform,armor,glasses
+            traits(string): 可选英文特征标签，例如 expressionless
         """
         return await self._build_and_invoke(
-            build_resolve_args,
-            "character",
-            input,
+            build_resolve_character_args,
+            name=name,
             top=top,
             providers=providers,
             work=work,
+            hair_colors=hair_colors,
+            eye_colors=eye_colors,
+            hair_styles=hair_styles,
+            genders=genders,
+            apparent_ages=apparent_ages,
+            clothing=clothing,
+            traits=traits,
         )
 
     @filter.llm_tool(name="ani_resolver_resolve_image")

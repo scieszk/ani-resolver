@@ -14,7 +14,7 @@ class FixtureProvider implements Provider {
     id: "fixture",
     label: "Fixture",
     mediaTypes: ["anime"],
-    capabilities: ["work_search", "character_search"],
+    capabilities: ["work_search", "character_search", "character_appearance_search"],
     languages: ["zh", "en"],
     auth: "none",
     strengths: ["tests"],
@@ -49,19 +49,31 @@ class FixtureProvider implements Provider {
 }
 
 describe("DefaultResolutionService", () => {
-  it("infers a character request and returns the typed resolver result", async () => {
+  it("forwards an explicit structured character request", async () => {
     const service = new DefaultResolutionService({ providers: [new FixtureProvider()] });
     const outcome = await service.resolve({
-      input: "女主是白发双马尾，前期没什么表情",
-      target: "auto",
+      input: "",
+      target: "character",
       providers: ["all"],
       attachments: [],
+      appearance: {
+        hairColors: ["white"],
+        eyeColors: [],
+        hairStyles: ["twintails"],
+        genders: ["female"],
+        apparentAges: [],
+        clothing: [],
+        traits: ["expressionless"],
+      },
     });
 
     expect(outcome.resolvedTarget).toBe("character");
     expect(outcome.result).toMatchObject({
       schemaVersion: "ani-resolver.resolve.v1",
-      query: { entityType: "character" },
+      query: {
+        entityType: "character",
+        appearance: expect.objectContaining({ hairColors: ["white"], hairStyles: ["twintails"] }),
+      },
       candidates: [expect.objectContaining({ entityType: "character", names: ["Isla"] })],
     });
     await service.close();

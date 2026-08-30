@@ -3,7 +3,7 @@ import { ProviderManager, type ProviderListItem } from "../provider-management.j
 import { Resolver } from "../resolver.js";
 import type { Provider } from "../types.js";
 import type { ResolutionRequest, ResolutionService } from "./server.js";
-import { inferRunTarget, selectResolutionInput } from "./target.js";
+import { selectResolutionInput } from "./target.js";
 
 export interface DefaultResolutionServiceOptions {
   providerManager?: ProviderManager;
@@ -42,12 +42,11 @@ export class DefaultResolutionService implements ResolutionService {
     const attachments = request.attachments
       .filter((attachment) => attachment.stored && attachment.path)
       .map((attachment) => ({ kind: attachment.kind, path: attachment.path! }));
-    const resolvedTarget =
-      request.target === "auto"
-        ? inferRunTarget({ input: request.input, attachments })
-        : request.target;
+    const resolvedTarget = request.target;
     const input = selectResolutionInput({ input: request.input, target: resolvedTarget, attachments });
-    if (!input) throw new Error("No compatible input is available for this resolution target");
+    if (!input && resolvedTarget !== "character") {
+      throw new Error("No compatible input is available for this resolution target");
+    }
     const providers = await this.providers();
     if (resolvedTarget === "image") {
       return {
@@ -66,6 +65,8 @@ export class DefaultResolutionService implements ResolutionService {
         input,
         limit: this.limit,
         providers: request.providers,
+        ...(request.appearance ? { appearance: request.appearance } : {}),
+        ...(request.work ? { work: request.work } : {}),
       }),
     };
   }

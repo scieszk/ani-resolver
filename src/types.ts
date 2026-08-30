@@ -74,6 +74,7 @@ export interface ProviderManifest {
 export interface ResolveQuery {
   entityType: EntityType;
   text: string;
+  appearance?: CharacterAppearance;
   title?: string;
   year?: number;
   season?: number;
@@ -193,6 +194,7 @@ export interface ContentEvidence {
 export interface ResolveRequest {
   entityType: EntityType;
   input: string;
+  appearance?: Partial<CharacterAppearance>;
   limit?: number;
   providers: string[];
   work?: ExternalId;
@@ -214,7 +216,11 @@ export interface ResolvedCandidate {
 
 export interface ResolveResult {
   schemaVersion: "ani-resolver.resolve.v1";
-  query: ContentEvidence & { entityType: EntityType; work?: ExternalId };
+  query: ContentEvidence & {
+    entityType: EntityType;
+    work?: ExternalId;
+    appearance?: CharacterAppearance;
+  };
   candidates: ResolvedCandidate[];
   providerRuns: ProviderRunSummary[];
 }
