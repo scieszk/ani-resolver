@@ -8,6 +8,7 @@ export type ProviderCapability =
   | "character_appearance_search"
   | "character_detail"
   | "work_characters"
+  | "entity_relations"
   | "id_mapping"
   | "episodes"
   | "anime_scene_lookup"
@@ -97,6 +98,21 @@ export interface ProviderCandidate {
   evidence: SourceEvidence[];
 }
 
+export type RelatedEntityType = EntityType | "person";
+
+export interface ProviderRelatedEntity {
+  entityType: RelatedEntityType;
+  provider: string;
+  providerId: string;
+  names: string[];
+  externalIds: ExternalId[];
+  image?: string;
+  mediaKind?: MediaKind;
+  year?: number;
+  relation?: string;
+  facts: Record<string, unknown>;
+}
+
 export interface ProviderRun<T = ProviderCandidate> {
   provider: string;
   status: ProviderStatus;
@@ -120,6 +136,10 @@ export interface Provider {
   searchImage?(query: ImageQuery): Promise<ProviderRun<ImageMatch>>;
   getEntity?(id: ExternalId, entityType: EntityType): Promise<ProviderRun<ProviderCandidate>>;
   listWorkCharacters?(work: ExternalId): Promise<ProviderRun<ProviderCandidate>>;
+  listEntityRelations?(
+    id: ExternalId,
+    entityType: EntityType,
+  ): Promise<ProviderRun<ProviderRelatedEntity>>;
 }
 
 export type ImageMatchType = "anime_scene" | "source" | "character";

@@ -61,6 +61,40 @@ export interface WebFavorite {
   updatedAt: string;
 }
 
+export type WebRelatedEntityType = "work" | "character" | "person";
+
+export interface WebRelatedEntity {
+  entityType: WebRelatedEntityType;
+  provider: string;
+  providerId: string;
+  names: string[];
+  externalIds: WebExternalId[];
+  image?: string;
+  mediaKind?: WebExternalId["mediaKind"];
+  year?: number;
+  relation?: string;
+  facts: Record<string, unknown>;
+}
+
+export interface WebFavoriteContext {
+  works: WebRelatedEntity[];
+  characters: WebRelatedEntity[];
+  people: WebRelatedEntity[];
+  providerRuns: Array<{
+    provider: string;
+    status: string;
+    itemCount: number;
+    message?: string;
+    elapsedMs?: number;
+  }>;
+  refreshedAt: string;
+}
+
+export interface WebFavoriteDetail {
+  favorite: WebFavorite;
+  context: WebFavoriteContext;
+}
+
 export interface WebProvider {
   id: string;
   label: string;
@@ -108,6 +142,7 @@ export interface AniResolverApi {
   createRun(input: CreateWebRunInput): Promise<WebRun>;
   deleteRun(id: string): Promise<void>;
   listFavorites(query?: string, entityType?: string): Promise<{ items: WebFavorite[]; total: number }>;
+  getFavorite(id: string): Promise<WebFavoriteDetail | null>;
   saveFavorite(runId: string, candidateKey: string): Promise<WebFavorite>;
   deleteFavorite(id: string): Promise<void>;
   listProviders(): Promise<{ items: WebProvider[] }>;

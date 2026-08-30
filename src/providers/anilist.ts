@@ -13,6 +13,7 @@ import type {
   Provider,
   ProviderCandidate,
   ProviderManifest,
+  ProviderRelatedEntity,
   ProviderRun,
   ResolveQuery,
 } from "../types.js";
@@ -52,6 +53,19 @@ const characterSchema = z
     bloodType: z.string().nullish(),
     favourites: z.number().nullish(),
     siteUrl: z.string().nullish(),
+  })
+  .passthrough();
+const staffSchema = z
+  .object({
+    id: z.number().int().positive(),
+    name: z.object({
+      full: z.string().nullish(),
+      native: z.string().nullish(),
+      alternative: z.array(z.string()).nullish(),
+    }),
+    image: z.object({ large: z.string().nullish() }).nullish(),
+    siteUrl: z.string().nullish(),
+    languageV2: z.string().nullish(),
   })
   .passthrough();
 const graphQlErrorsSchema = z
@@ -121,6 +135,46 @@ query CharacterDetail($id: Int!) {
   }
 }`;
 
+const WORK_RELATIONS = `
+query WorkRelations($id: Int!, $perPage: Int!) {
+  Media(id: $id, type: ANIME) {
+    characters(page: 1, perPage: $perPage, sort: [ROLE, FAVOURITES_DESC]) {
+      edges {
+        role
+        node {
+          id siteUrl favourites gender age bloodType
+          name { full native alternative alternativeSpoiler }
+          image { large }
+          description(asHtml: false)
+        }
+        voiceActors(language: JAPANESE, sort: [RELEVANCE, ID]) {
+          id siteUrl languageV2
+          name { full native alternative }
+          image { large }
+        }
+      }
+    }
+  }
+}`;
+
+const CHARACTER_RELATIONS = `
+query CharacterRelations($id: Int!, $perPage: Int!) {
+  Character(id: $id) {
+    media(page: 1, perPage: $perPage, sort: [POPULARITY_DESC]) {
+      edges {
+        characterRole
+        node {
+          id idMal format siteUrl popularity
+          title { romaji english native }
+          startDate { year }
+          description(asHtml: false)
+          coverImage { large }
+        }
+      }
+    }
+  }
+}`;
+
 const USER_AGENT = "ani-resolver/0.1.0 (https://github.com/scieszk/ani-resolver)";
 
 export interface AniListProviderOptions {
@@ -141,6 +195,7 @@ export class AniListProvider implements Provider {
       "character_appearance_search",
       "character_detail",
       "work_characters",
+      "entity_relations",
       "id_mapping",
     ],
     languages: ["en", "ja"],
@@ -260,6 +315,47 @@ export class AniListProvider implements Provider {
     return this.fetchWorkCharacters(work, 25);
   }
 
+  async listEntityRelations(
+    id: ExternalId,
+    entityType: "work" | "character",
+  ): Promise<ProviderRun<ProviderRelatedEntity>> {
+    const numeric = id.source === "anilist" ? numericId(id.id) : undefined;
+    if (!numeric) return unsupported(this.manifest.id, "AniList IDs must use anilist:<number>");
+    if (entityType === "work") {
+      return this.fetchWorkRelations(id, 25);
+    }
+    const response = await this.graphql(CHARACTER_RELATIONS, { id: numeric, perPage: 25 });
+    if (!response.ok) return response.run;
+    const schema = z.object({
+      data: z.object({
+        Character: z.object({
+          media: z.object({
+            edges: z.array(z.object({
+              characterRole: z.string().nullish(),
+              node: mediaSchema,
+            })),
+          }),
+        }).nullable(),
+      }),
+      errors: graphQlErrorsSchema,
+    });
+    const parsed = schema.safeParse(response.data);
+    if (!parsed.success) return invalidResponse<ProviderRelatedEntity>(this.manifest.id, parsed.error.message);
+    if (parsed.data.errors?.length) return graphQlError<ProviderRelatedEntity>(this.manifest.id, parsed.data.errors);
+    const edges = parsed.data.data.Character?.media.edges ?? [];
+    return relatedRun(
+      this.manifest.id,
+      edges.map((edge, index) => candidateRelation(
+        workCandidate(
+          edge.node,
+          { entityType: "work", text: edge.node.title.romaji ?? String(edge.node.id), limit: 25 },
+          index,
+        ),
+        edge.characterRole ?? undefined,
+      )),
+    );
+  }
+
   private async fetchWorkCharacters(
     work: ExternalId,
     limit: number,
@@ -288,6 +384,41 @@ export class AniListProvider implements Provider {
       this.manifest.id,
       edges.map((edge, index) => characterCandidate(edge.node, query, index, edge.role ?? null)),
     );
+  }
+
+  private async fetchWorkRelations(
+    work: ExternalId,
+    limit: number,
+  ): Promise<ProviderRun<ProviderRelatedEntity>> {
+    const id = numericId(work.id)!;
+    const response = await this.graphql(WORK_RELATIONS, { id, perPage: bounded(limit, 25) });
+    if (!response.ok) return response.run;
+    const schema = z.object({
+      data: z.object({
+        Media: z
+          .object({
+            characters: z.object({
+              edges: z.array(z.object({
+                role: z.string().nullish(),
+                node: characterSchema,
+                voiceActors: z.array(staffSchema),
+              })),
+            }),
+          })
+          .nullable(),
+      }),
+      errors: graphQlErrorsSchema,
+    });
+    const parsed = schema.safeParse(response.data);
+    if (!parsed.success) return invalidResponse<ProviderRelatedEntity>(this.manifest.id, parsed.error.message);
+    if (parsed.data.errors?.length) return graphQlError<ProviderRelatedEntity>(this.manifest.id, parsed.data.errors);
+    const edges = parsed.data.data.Media?.characters.edges ?? [];
+    const query: ResolveQuery = { entityType: "character", text: "", work, limit: edges.length };
+    const items = edges.flatMap((edge, index) => [
+      candidateRelation(characterCandidate(edge.node, query, index, edge.role ?? null)),
+      ...edge.voiceActors.map((actor) => voiceActorRelation(actor, edge.node.name.full ?? edge.node.name.native ?? undefined)),
+    ]);
+    return relatedRun(this.manifest.id, uniqueRelated(items));
   }
 
   private async graphql(query: string, variables: Record<string, unknown>) {
@@ -396,6 +527,68 @@ function characterCandidate(
   };
 }
 
+function candidateRelation(
+  candidate: ProviderCandidate,
+  relation?: string,
+): ProviderRelatedEntity {
+  const image = typeof candidate.facts.image === "string" && candidate.facts.image
+    ? candidate.facts.image
+    : undefined;
+  const storedRelation = typeof candidate.facts.role === "string" && candidate.facts.role
+    ? candidate.facts.role
+    : undefined;
+  const relationValue = relation ?? storedRelation;
+  return {
+    entityType: candidate.entityType,
+    provider: candidate.provider,
+    providerId: candidate.providerId,
+    names: candidate.names,
+    externalIds: candidate.externalIds,
+    ...(image ? { image } : {}),
+    ...(candidate.mediaKind ? { mediaKind: candidate.mediaKind } : {}),
+    ...(candidate.year !== undefined ? { year: candidate.year } : {}),
+    ...(relationValue ? { relation: relationValue } : {}),
+    facts: candidate.facts,
+  };
+}
+
+function voiceActorRelation(
+  actor: z.infer<typeof staffSchema>,
+  character: string | undefined,
+): ProviderRelatedEntity {
+  const names = unique([
+    actor.name.full,
+    actor.name.native,
+    ...(actor.name.alternative ?? []),
+  ].filter(isText));
+  const image = actor.image?.large ?? undefined;
+  return {
+    entityType: "person",
+    provider: "anilist",
+    providerId: String(actor.id),
+    names: names.length ? names : [String(actor.id)],
+    externalIds: [{ source: "anilist-staff", id: String(actor.id) }],
+    ...(image ? { image } : {}),
+    relation: "Voice actor",
+    facts: {
+      image: image ?? null,
+      siteUrl: actor.siteUrl ?? null,
+      language: actor.languageV2 ?? null,
+      character: character ?? null,
+    },
+  };
+}
+
+function uniqueRelated(items: ProviderRelatedEntity[]): ProviderRelatedEntity[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.entityType}:${item.externalIds[0]?.source ?? item.provider}:${item.externalIds[0]?.id ?? item.providerId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function rankCharacterCandidate(
   candidate: ProviderCandidate,
   query: ResolveQuery,
@@ -482,22 +675,29 @@ function formatKind(value: string | null | undefined): MediaKind {
   }
 }
 
-function graphQlError(
+function graphQlError<T = ProviderCandidate>(
   provider: string,
   errors: Array<{ message: string }>,
-): ProviderRun<ProviderCandidate> {
-  return invalidResponse(provider, errors.map((error) => error.message).join("; "));
+): ProviderRun<T> {
+  return invalidResponse<T>(provider, errors.map((error) => error.message).join("; "));
 }
 
 function run(provider: string, items: ProviderCandidate[]): ProviderRun<ProviderCandidate> {
   return { provider, status: items.length ? "ok" : "empty", items };
 }
 
-function unsupported(provider: string, message: string): ProviderRun<ProviderCandidate> {
+function relatedRun(
+  provider: string,
+  items: ProviderRelatedEntity[],
+): ProviderRun<ProviderRelatedEntity> {
+  return { provider, status: items.length ? "ok" : "empty", items };
+}
+
+function unsupported<T = ProviderCandidate>(provider: string, message: string): ProviderRun<T> {
   return { provider, status: "unsupported", items: [], message };
 }
 
-function invalidResponse(provider: string, message: string): ProviderRun<ProviderCandidate> {
+function invalidResponse<T = ProviderCandidate>(provider: string, message: string): ProviderRun<T> {
   return { provider, status: "invalid_response", items: [], message };
 }
 

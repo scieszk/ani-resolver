@@ -6,6 +6,7 @@ import type {
   WebProvider,
   WebRun,
   WebFavorite,
+  WebFavoriteDetail,
 } from "./types.js";
 
 export class ApiError extends Error {
@@ -52,6 +53,14 @@ export const webApi: AniResolverApi = {
     return request<{ items: WebFavorite[]; total: number }>(
       `/api/favorites${search.size ? `?${search}` : ""}`,
     );
+  },
+  async getFavorite(id) {
+    try {
+      return await request<WebFavoriteDetail>(`/api/favorites/${encodeURIComponent(id)}`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
   },
   async saveFavorite(runId, candidateKey) {
     return request<WebFavorite>("/api/favorites", {

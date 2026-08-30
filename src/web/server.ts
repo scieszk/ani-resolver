@@ -13,11 +13,13 @@ import Fastify, {
 import { hasAppearanceFacts, parseAppearanceInput } from "../appearance.js";
 import type { ProviderListItem } from "../provider-management.js";
 import type { CharacterAppearance, ExternalId } from "../types.js";
+import type { FavoriteContext } from "./favorite-context.js";
 import {
   type AddAttachmentInput,
   type RunRecord,
   type RunStore,
   type StoredAttachment,
+  type FavoriteRecord,
 } from "./run-store.js";
 import { type ResolvedRunTarget } from "./target.js";
 
@@ -43,6 +45,7 @@ export interface ResolutionService {
     result: unknown;
   }>;
   listProviders(): Promise<ProviderListItem[]>;
+  getFavoriteContext(favorite: FavoriteRecord): Promise<FavoriteContext>;
 }
 
 export interface CreateWebAppOptions {
@@ -202,6 +205,17 @@ export async function createWebApp(options: CreateWebAppOptions): Promise<Fastif
       return reply.code(201).send(await options.store.saveFavorite({ ...favorite, sourceRunId: runId }));
     },
   );
+
+  app.get<{ Params: { id: string } }>("/api/favorites/:id", async (request, reply) => {
+    const favorite = await options.store.getFavorite(request.params.id);
+    if (!favorite) {
+      return reply.code(404).send(notFound("favorite_not_found", "Favorite not found"));
+    }
+    return {
+      favorite,
+      context: await options.service.getFavoriteContext(favorite),
+    };
+  });
 
   app.delete<{ Params: { id: string } }>("/api/favorites/:id", async (request, reply) => {
     if (!(await options.store.deleteFavorite(request.params.id))) {

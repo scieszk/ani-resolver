@@ -202,4 +202,89 @@ describe("AniListProvider", () => {
 
     expect(result.items.map((item) => item.providerId)).toEqual(["183965", "176754"]);
   });
+
+  it("lists anime related to a confirmed character", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        data: {
+          Character: {
+            media: {
+              edges: [{
+                characterRole: "MAIN",
+                node: {
+                  id: 154587,
+                  idMal: 52991,
+                  title: {
+                    romaji: "Sousou no Frieren",
+                    english: "Frieren: Beyond Journey's End",
+                    native: "葬送のフリーレン",
+                  },
+                  format: "TV",
+                  startDate: { year: 2023 },
+                  description: "Fantasy anime",
+                  coverImage: { large: "https://example.test/cover.jpg" },
+                  siteUrl: "https://anilist.co/anime/154587",
+                  popularity: 500000,
+                },
+              }],
+            },
+          },
+        },
+      }),
+    );
+    const provider = new AniListProvider({ fetcher });
+
+    const result = await provider.listEntityRelations!(
+      { source: "anilist", id: "176754" },
+      "character",
+    );
+
+    expect(result.items[0]).toMatchObject({
+      entityType: "work",
+      providerId: "154587",
+      relation: "MAIN",
+      names: expect.arrayContaining(["Sousou no Frieren"]),
+      image: "https://example.test/cover.jpg",
+    });
+  });
+
+  it("lists a work's cast and voice actors as encyclopedia relations", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        data: {
+          Media: {
+            characters: {
+              edges: [{
+                role: "MAIN",
+                node: frieren,
+                voiceActors: [{
+                  id: 95061,
+                  name: { full: "Atsumi Tanezaki", native: "種﨑敦美", alternative: [] },
+                  image: { large: "https://example.test/atsumi.jpg" },
+                  siteUrl: "https://anilist.co/staff/95061",
+                  languageV2: "Japanese",
+                }],
+              }],
+            },
+          },
+        },
+      }),
+    );
+    const provider = new AniListProvider({ fetcher });
+
+    const result = await provider.listEntityRelations!(
+      { source: "anilist", id: "154587" },
+      "work",
+    );
+
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ entityType: "character", providerId: "176754", relation: "MAIN" }),
+      expect.objectContaining({
+        entityType: "person",
+        providerId: "95061",
+        names: expect.arrayContaining(["Atsumi Tanezaki", "種﨑敦美"]),
+        relation: "Voice actor",
+      }),
+    ]));
+  });
 });

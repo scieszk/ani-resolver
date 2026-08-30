@@ -297,6 +297,94 @@ describe("BangumiProvider", () => {
     });
     expect(fetcher).not.toHaveBeenCalled();
   });
+
+  it("combines a character's related works and people", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/v0/characters/12080/subjects")) {
+        return new Response(JSON.stringify([{
+          id: 500000,
+          name: "プラスティック・メモリーズ",
+          name_cn: "可塑性记忆",
+          type: 2,
+          date: "2015-04-05",
+          platform: "TV",
+          summary: "",
+          infobox: [],
+          images: { large: "https://example.test/work.jpg" },
+          relation: "主角",
+        }]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify([{
+        id: 1001,
+        name: "雨宫天",
+        type: 1,
+        images: { large: "https://example.test/person.jpg" },
+        relation: "声优",
+      }]), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const provider = new BangumiProvider({ fetcher });
+
+    const result = await provider.listEntityRelations!(
+      { source: "bangumi", id: "12080" },
+      "character",
+    );
+
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ entityType: "work", providerId: "500000", relation: "主角" }),
+      expect.objectContaining({ entityType: "person", providerId: "1001", relation: "声优" }),
+    ]));
+  });
+
+  it("marks relation results as partial when one Bangumi endpoint fails", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/persons")) {
+        return new Response("people endpoint unavailable", { status: 503 });
+      }
+      return new Response(JSON.stringify([{
+        id: 500000,
+        name: "プラスティック・メモリーズ",
+        name_cn: "可塑性记忆",
+        type: 2,
+        date: "2015-04-05",
+        platform: "TV",
+        summary: "",
+        infobox: [],
+        images: null,
+      }]), { status: 200, headers: { "content-type": "application/json" } });
+    });
+
+    const result = await new BangumiProvider({ fetcher }).listEntityRelations!(
+      { source: "bangumi", id: "12080" },
+      "character",
+    );
+
+    expect(result).toMatchObject({
+      status: "ok",
+      message: expect.stringContaining("people endpoint unavailable"),
+    });
+    expect(result.items).toHaveLength(1);
+  });
+
+  it("returns the failure when the other Bangumi relation endpoint is empty", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/persons")) {
+        return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("subject endpoint unavailable", { status: 503 });
+    });
+
+    const result = await new BangumiProvider({ fetcher }).listEntityRelations!(
+      { source: "bangumi", id: "12080" },
+      "character",
+    );
+
+    expect(result).toMatchObject({
+      status: "unavailable",
+      items: [],
+      message: expect.stringContaining("subject endpoint unavailable"),
+    });
+  });
 });
 
 describe("TmdbProvider", () => {

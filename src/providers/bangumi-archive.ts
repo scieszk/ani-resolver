@@ -20,6 +20,7 @@ import type {
   Provider,
   ProviderCandidate,
   ProviderManifest,
+  ProviderRelatedEntity,
   ProviderRun,
   ResolveQuery,
 } from "../types.js";
@@ -51,6 +52,7 @@ interface SubjectRow {
   media_kind: MediaKind;
   year: number | null;
   facts_json: string;
+  relation_type?: string | null;
 }
 
 interface CharacterRow {
@@ -71,6 +73,7 @@ export const bangumiArchiveManifest: ProviderManifest = {
     "character_appearance_search",
     "character_detail",
     "work_characters",
+    "entity_relations",
   ],
   languages: ["zh", "ja"],
   auth: "none",
@@ -335,6 +338,37 @@ export class BangumiArchiveProvider implements Provider {
     }
   }
 
+  async listEntityRelations(
+    id: ExternalId,
+    entityType: "work" | "character",
+  ): Promise<ProviderRun<ProviderRelatedEntity>> {
+    if (id.source !== "bangumi") {
+      return { provider: this.manifest.id, status: "unsupported", items: [], message: "not a Bangumi ID" };
+    }
+    const database = this.open();
+    try {
+      const items = entityType === "work"
+        ? workCharacterRows(database, id.id).map((row, index) =>
+            relatedEntity(characterCandidate(row, index), relationLabel(row.relation_type)))
+        : characterWorkRows(database, id.id).map((row, index) =>
+            relatedEntity(
+              subjectCandidate(
+                row,
+                {
+                  entityType: "work",
+                  text: parseJson<string[]>(row.names_json, [id.id])[0] ?? id.id,
+                  limit: 1,
+                },
+                index,
+              ),
+              relationLabel(row.relation_type),
+            ));
+      return relatedRun(this.manifest.id, items);
+    } finally {
+      database.close();
+    }
+  }
+
   private open(): DatabaseSync {
     return new DatabaseSync(this.indexPath, { readOnly: true });
   }
@@ -565,7 +599,53 @@ function workCharacterRows(database: DatabaseSync, workId: string): CharacterRow
     .all(workId) as unknown as CharacterRow[];
 }
 
+function characterWorkRows(database: DatabaseSync, characterId: string): SubjectRow[] {
+  return database
+    .prepare(
+      `SELECT s.id, s.names_json, s.media_kind, s.year, s.facts_json, r.relation_type
+       FROM subject_characters r
+       JOIN subjects s ON s.id = r.subject_id
+       WHERE r.character_id = ?
+       ORDER BY s.year DESC, s.id`,
+    )
+    .all(characterId) as unknown as SubjectRow[];
+}
+
+function relatedEntity(
+  candidate: ProviderCandidate,
+  relation: string | undefined,
+): ProviderRelatedEntity {
+  const image = typeof candidate.facts.image === "string" && candidate.facts.image
+    ? candidate.facts.image
+    : undefined;
+  return {
+    entityType: candidate.entityType,
+    provider: candidate.provider,
+    providerId: candidate.providerId,
+    names: candidate.names,
+    externalIds: candidate.externalIds,
+    ...(image ? { image } : {}),
+    ...(candidate.mediaKind ? { mediaKind: candidate.mediaKind } : {}),
+    ...(candidate.year !== undefined ? { year: candidate.year } : {}),
+    ...(relation ? { relation } : {}),
+    facts: candidate.facts,
+  };
+}
+
+function relationLabel(value: string | null | undefined): string | undefined {
+  if (value === "1") return "Main";
+  if (value === "2") return "Supporting";
+  return value || undefined;
+}
+
 function run(provider: string, items: ProviderCandidate[]): ProviderRun<ProviderCandidate> {
+  return { provider, status: items.length ? "ok" : "empty", items };
+}
+
+function relatedRun(
+  provider: string,
+  items: ProviderRelatedEntity[],
+): ProviderRun<ProviderRelatedEntity> {
   return { provider, status: items.length ? "ok" : "empty", items };
 }
 

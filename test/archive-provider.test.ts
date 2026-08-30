@@ -50,6 +50,17 @@ async function fixture(): Promise<{ archive: string; index: string }> {
             date: "",
             platform: 1,
           },
+          {
+            id: 500000,
+            type: 2,
+            name: "プラスティック・メモリーズ",
+            name_cn: "可塑性记忆",
+            summary: "人与智能机器人的故事。",
+            infobox: [],
+            tags: [{ name: "科幻" }],
+            date: "2015-04-05",
+            platform: 1,
+          },
           { id: 1, type: 1, name: "not anime", name_cn: "", summary: "" },
         ]),
       ),
@@ -58,6 +69,7 @@ async function fixture(): Promise<{ archive: string; index: string }> {
           { subject_id: 395378, character_id: 999, type: 5, order: 0 },
           { subject_id: 395378, character_id: 120910, type: 1, order: 1 },
           { subject_id: 395378, character_id: 130000, type: 1, order: 2 },
+          { subject_id: 500000, character_id: 130000, type: 1, order: 0 },
         ]),
       ),
       "character.jsonlines": strToU8(
@@ -104,7 +116,7 @@ describe("BangumiArchiveProvider", () => {
 
     const result = await buildBangumiArchiveIndex(paths);
 
-    expect(result).toMatchObject({ subjects: 2, characters: 3, relations: 3 });
+    expect(result).toMatchObject({ subjects: 3, characters: 3, relations: 4 });
     expect(result.sourceBytes).toBeGreaterThan(0);
   });
 
@@ -147,6 +159,38 @@ describe("BangumiArchiveProvider", () => {
 
     expect(search.items[0]).toMatchObject({ providerId: "120910" });
     expect(characters.items[0]).toMatchObject({ providerId: "120910" });
+  });
+
+  it("lists confirmed entity relations in both directions", async () => {
+    const paths = await fixture();
+    await buildBangumiArchiveIndex(paths);
+    const provider = new BangumiArchiveProvider({ indexPath: paths.index });
+
+    const characterRelations = await provider.listEntityRelations!(
+      { source: "bangumi", id: "130000" },
+      "character",
+    );
+    const workRelations = await provider.listEntityRelations!(
+      { source: "bangumi", id: "395378" },
+      "work",
+    );
+
+    expect(characterRelations.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        entityType: "work",
+        providerId: "395378",
+        names: expect.arrayContaining(["迷宫饭"]),
+      }),
+      expect.objectContaining({
+        entityType: "work",
+        providerId: "500000",
+        names: expect.arrayContaining(["可塑性记忆"]),
+      }),
+    ]));
+    expect(workRelations.items[0]).toMatchObject({
+      entityType: "character",
+      providerId: "120910",
+    });
   });
 
   it("ranks a literal character name inside a known work", async () => {

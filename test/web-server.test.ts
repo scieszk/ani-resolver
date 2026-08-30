@@ -39,6 +39,29 @@ async function fixture() {
   }));
   const service: ResolutionService = {
     resolve,
+    getFavoriteContext: vi.fn(async () => ({
+      works: [{
+        entityType: "work",
+        provider: "anilist",
+        providerId: "154587",
+        names: ["Plastic Memories"],
+        externalIds: [{ source: "anilist", id: "154587" }],
+        relation: "MAIN",
+        facts: {},
+      }],
+      characters: [],
+      people: [{
+        entityType: "person",
+        provider: "bangumi",
+        providerId: "1001",
+        names: ["Sora Amamiya"],
+        externalIds: [{ source: "bangumi-person", id: "1001" }],
+        relation: "Voice actor",
+        facts: {},
+      }],
+      providerRuns: [{ provider: "anilist", status: "ok", itemCount: 1 }],
+      refreshedAt: "2026-08-30T02:00:00.000Z",
+    })),
     listProviders: vi.fn(async () => [
       {
         id: "anilist",
@@ -196,7 +219,7 @@ describe("ani-resolver web API", () => {
   });
 
   it("creates, searches, and deletes favorite candidate snapshots", async () => {
-    const { app, store } = await fixture();
+    const { app, store, service } = await fixture();
     const createdRun = await app.inject({
       method: "POST",
       url: "/api/runs",
@@ -217,6 +240,16 @@ describe("ani-resolver web API", () => {
       sourceRunId: runId,
     });
     const favoriteId = created.json().id as string;
+    const detail = await app.inject({ method: "GET", url: `/api/favorites/${favoriteId}` });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({
+      favorite: { id: favoriteId, title: "Isla" },
+      context: {
+        works: [expect.objectContaining({ names: ["Plastic Memories"] })],
+        people: [expect.objectContaining({ names: ["Sora Amamiya"] })],
+      },
+    });
+    expect(service.getFavoriteContext).toHaveBeenCalledWith(expect.objectContaining({ id: favoriteId }));
     const list = await app.inject({ method: "GET", url: "/api/favorites?query=Isla&type=character" });
     expect(list.json()).toMatchObject({ total: 1, items: [{ id: favoriteId }] });
 
@@ -279,6 +312,9 @@ describe("ani-resolver web API", () => {
     await store.open();
     const service: ResolutionService = {
       listProviders: vi.fn(async () => []),
+      getFavoriteContext: vi.fn(async () => ({
+        works: [], characters: [], people: [], providerRuns: [], refreshedAt: new Date().toISOString(),
+      })),
       resolve: vi.fn(async () => {
         throw new Error("provider unavailable");
       }),

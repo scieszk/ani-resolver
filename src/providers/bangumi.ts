@@ -12,6 +12,7 @@ import type {
   Provider,
   ProviderCandidate,
   ProviderManifest,
+  ProviderRelatedEntity,
   ProviderRun,
   ResolveQuery,
 } from "../types.js";
@@ -45,6 +46,7 @@ const subjectSchema = z
     infobox: infoboxSchema,
     images: imagesSchema,
     type: z.number(),
+    relation: z.string().optional(),
   })
   .passthrough();
 
@@ -63,6 +65,18 @@ const characterSchema = z
 
 const subjectPageSchema = z.object({ data: z.array(subjectSchema) }).passthrough();
 const characterPageSchema = z.object({ data: z.array(characterSchema) }).passthrough();
+const personSchema = z
+  .object({
+    id: z.number(),
+    name: z.string(),
+    type: z.number().optional(),
+    summary: z.string().optional(),
+    infobox: infoboxSchema,
+    images: imagesSchema,
+    relation: z.string().optional(),
+    career: z.array(z.string()).optional(),
+  })
+  .passthrough();
 
 export interface BangumiProviderOptions {
   fetcher?: typeof fetch;
@@ -83,6 +97,7 @@ export class BangumiProvider implements Provider {
       "character_appearance_search",
       "character_detail",
       "work_characters",
+      "entity_relations",
     ],
     languages: ["zh", "ja", "en"],
     auth: "optional",
@@ -226,6 +241,86 @@ export class BangumiProvider implements Provider {
     return { provider: this.manifest.id, status: items.length ? "ok" : "empty", items };
   }
 
+  async listEntityRelations(
+    id: ExternalId,
+    entityType: "work" | "character",
+  ): Promise<ProviderRun<ProviderRelatedEntity>> {
+    if (id.source !== "bangumi") {
+      return { provider: this.manifest.id, status: "unsupported", items: [], message: "not a Bangumi ID" };
+    }
+    const root = entityType === "work" ? "subjects" : "characters";
+    const [entityResult, peopleResult] = await Promise.all([
+      requestJson(
+        this.manifest.id,
+        this.fetcher,
+        `${this.baseUrl}/v0/${root}/${encodeURIComponent(id.id)}/${entityType === "work" ? "characters" : "subjects"}`,
+        { headers: this.headers() },
+      ),
+      requestJson(
+        this.manifest.id,
+        this.fetcher,
+        `${this.baseUrl}/v0/${root}/${encodeURIComponent(id.id)}/persons`,
+        { headers: this.headers() },
+      ),
+    ]);
+
+    const items: ProviderRelatedEntity[] = [];
+    const failures: ProviderRun[] = [];
+    if (entityResult.ok) {
+      const parsed = entityType === "work"
+        ? z.array(characterSchema).safeParse(entityResult.data)
+        : z.array(subjectSchema).safeParse(entityResult.data);
+      if (!parsed.success) return invalidResponse<ProviderRelatedEntity>(this.manifest.id, parsed.error.message);
+      if (entityType === "work") {
+        items.push(...(parsed.data as Array<z.infer<typeof characterSchema>>).map((character, index) =>
+          candidateRelation(characterCandidate(
+            character,
+            { entityType: "character", text: "", work: id, limit: 25 },
+            index,
+          ), character.relation)));
+      } else {
+        items.push(...(parsed.data as Array<z.infer<typeof subjectSchema>>).map((subject, index) =>
+          candidateRelation(subjectCandidate(
+            subject,
+            { entityType: "work", text: subject.name, limit: 25 },
+            index,
+          ), subject.relation)));
+      }
+    } else {
+      failures.push(entityResult.run);
+    }
+
+    if (peopleResult.ok) {
+      const parsed = z.array(personSchema).safeParse(peopleResult.data);
+      if (!parsed.success) return invalidResponse<ProviderRelatedEntity>(this.manifest.id, parsed.error.message);
+      items.push(...parsed.data.map(personRelation));
+    } else {
+      failures.push(peopleResult.run);
+    }
+
+    const failureMessage = failures
+      .map((failure) => failure.message ?? failure.status)
+      .filter(Boolean)
+      .join("; ");
+    if (items.length) {
+      return {
+        provider: this.manifest.id,
+        status: "ok",
+        items,
+        ...(failureMessage ? { message: `Partial relation data: ${failureMessage}` } : {}),
+      };
+    }
+    if (failures.length) {
+      return {
+        provider: this.manifest.id,
+        status: failures[0]!.status,
+        items: [],
+        ...(failureMessage ? { message: failureMessage } : {}),
+      };
+    }
+    return { provider: this.manifest.id, status: "empty", items: [] };
+  }
+
   private headers(): Headers {
     const headers = new Headers({
       accept: "application/json",
@@ -313,6 +408,46 @@ function characterCandidate(
   };
 }
 
+function candidateRelation(
+  candidate: ProviderCandidate,
+  relation: string | undefined,
+): ProviderRelatedEntity {
+  const image = typeof candidate.facts.image === "string" && candidate.facts.image
+    ? candidate.facts.image
+    : undefined;
+  return {
+    entityType: candidate.entityType,
+    provider: candidate.provider,
+    providerId: candidate.providerId,
+    names: candidate.names,
+    externalIds: candidate.externalIds,
+    ...(image ? { image } : {}),
+    ...(candidate.mediaKind ? { mediaKind: candidate.mediaKind } : {}),
+    ...(candidate.year !== undefined ? { year: candidate.year } : {}),
+    ...(relation ? { relation } : {}),
+    facts: candidate.facts,
+  };
+}
+
+function personRelation(person: z.infer<typeof personSchema>): ProviderRelatedEntity {
+  const names = collectNames(person.name, undefined, person.infobox);
+  const image = preferredImage(person.images);
+  return {
+    entityType: "person",
+    provider: "bangumi",
+    providerId: String(person.id),
+    names,
+    externalIds: [{ source: "bangumi-person", id: String(person.id) }],
+    ...(image ? { image } : {}),
+    ...(person.relation ? { relation: person.relation } : {}),
+    facts: {
+      summary: person.summary ?? "",
+      career: person.career ?? [],
+      image: image ?? null,
+    },
+  };
+}
+
 function rankCharacterCandidate(candidate: ProviderCandidate, query: ResolveQuery): ProviderCandidate {
   const requested = query.appearance ?? emptyAppearance();
   const appearance = parseAppearanceText(JSON.stringify(candidate.facts));
@@ -391,6 +526,6 @@ function preferredImage(images: Record<string, string> | undefined): string | un
   return images?.large ?? images?.medium ?? images?.common ?? images?.small;
 }
 
-function invalidResponse(provider: string, message: string): ProviderRun<ProviderCandidate> {
+function invalidResponse<T = ProviderCandidate>(provider: string, message: string): ProviderRun<T> {
   return { provider, status: "invalid_response", items: [], message };
 }
